@@ -4,14 +4,14 @@ use argon2::{
     Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
     password_hash::{SaltString, rand_core::OsRng},
 };
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use axum::{
     Json, Router,
     extract::State,
     http::{HeaderMap, StatusCode, header},
     routing::{get, post},
 };
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use chrono::{Duration, Utc};
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use rand::RngCore;
@@ -120,8 +120,8 @@ impl AuthService {
     pub fn new(storage: Arc<Storage>, bootstrap_email: &str, bootstrap_password: &str) -> Self {
         let normalized_email = bootstrap_email.to_ascii_lowercase();
         let bootstrap_name = "Owner".to_string();
-        let bootstrap_password_hash = hash_password(bootstrap_password)
-            .expect("failed to create bootstrap password hash");
+        let bootstrap_password_hash =
+            hash_password(bootstrap_password).expect("failed to create bootstrap password hash");
         let bootstrap_workspace_id = Uuid::new_v4();
         let bootstrap_user_id = Uuid::new_v4();
 
@@ -186,10 +186,9 @@ impl AuthService {
         let now = Utc::now();
         let access_exp = now + Duration::minutes(access_ttl_minutes);
         let refresh_exp = now + Duration::days(refresh_ttl_days);
-        let (workspace_id, role) = self
-            .primary_membership(user.id)
-            .await
-            .ok_or_else(|| ApiError::Unauthorized("user has no workspace membership".to_string()))?;
+        let (workspace_id, role) = self.primary_membership(user.id).await.ok_or_else(|| {
+            ApiError::Unauthorized("user has no workspace membership".to_string())
+        })?;
 
         let claims = AccessClaims {
             sub: user.id.to_string(),
@@ -217,7 +216,9 @@ impl AuthService {
             replaced_by_hash: None,
         };
 
-        self.storage.put_refresh_session(refresh_hash, session).await;
+        self.storage
+            .put_refresh_session(refresh_hash, session)
+            .await;
 
         Ok(AuthTokensResponse {
             access_token,
@@ -283,7 +284,9 @@ impl AuthService {
             revoked_at: None,
             replaced_by_hash: None,
         };
-        self.storage.put_refresh_session(refresh_hash, rotated).await;
+        self.storage
+            .put_refresh_session(refresh_hash, rotated)
+            .await;
 
         let user = self
             .storage
@@ -292,10 +295,9 @@ impl AuthService {
             .ok_or_else(|| ApiError::Unauthorized("user not found".to_string()))?;
 
         let access_exp = Utc::now() + Duration::minutes(access_ttl_minutes);
-        let (workspace_id, role) = self
-            .primary_membership(user.id)
-            .await
-            .ok_or_else(|| ApiError::Unauthorized("user has no workspace membership".to_string()))?;
+        let (workspace_id, role) = self.primary_membership(user.id).await.ok_or_else(|| {
+            ApiError::Unauthorized("user has no workspace membership".to_string())
+        })?;
         let claims = AccessClaims {
             sub: user.id.to_string(),
             email: user.email,
@@ -357,7 +359,8 @@ impl AuthService {
         jwt_secret: &str,
     ) -> ApiResult<AuthContext> {
         let access_token = bearer_from_headers(headers)?;
-        self.authenticate_access_token(&access_token, jwt_secret).await
+        self.authenticate_access_token(&access_token, jwt_secret)
+            .await
     }
 
     pub async fn context_from_access_token(
@@ -365,7 +368,8 @@ impl AuthService {
         access_token: &str,
         jwt_secret: &str,
     ) -> ApiResult<AuthContext> {
-        self.authenticate_access_token(access_token, jwt_secret).await
+        self.authenticate_access_token(access_token, jwt_secret)
+            .await
     }
 
     async fn authenticate_access_token(
@@ -406,12 +410,21 @@ impl AuthService {
     }
 
     async fn ensure_bootstrap_seed(&self) {
-        if self
+        if let Some(existing) = self
             .storage
-            .get_auth_user_by_id(self.bootstrap_user_id)
+            .get_auth_user_by_email(&self.bootstrap_email)
             .await
-            .is_some()
         {
+            if self
+                .storage
+                .find_primary_membership(existing.id)
+                .await
+                .is_none()
+            {
+                self.storage
+                    .put_membership_role(self.bootstrap_workspace_id, existing.id, "owner")
+                    .await;
+            }
             return;
         }
 
@@ -635,13 +648,7 @@ mod tests {
             "ChangeMe123!",
         );
         let first = service
-            .login(
-                "owner@galynx.local",
-                "ChangeMe123!",
-                "secret",
-                15,
-                30,
-            )
+            .login("owner@galynx.local", "ChangeMe123!", "secret", 15, 30)
             .await
             .expect("login should succeed");
 

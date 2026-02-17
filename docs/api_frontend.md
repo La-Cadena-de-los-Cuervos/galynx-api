@@ -8,6 +8,25 @@ Este documento esta enfocado en integracion frontend (web/mobile) con `galynx-ap
 - Prefijo: `/api/v1`
 - OpenAPI: `GET /api/v1/openapi.json`
 
+## Variables de entorno del API
+
+- `PORT` (default: `3000`)
+- `JWT_SECRET` (default: `dev-only-change-me-in-prod`)
+- `ACCESS_TTL_MINUTES` (default: `15`)
+- `REFRESH_TTL_DAYS` (default: `30`)
+- `BOOTSTRAP_EMAIL` (default: `owner@galynx.local`)
+- `BOOTSTRAP_PASSWORD` (default: `ChangeMe123!`)
+- `PERSISTENCE_BACKEND` (`memory` o `mongo`, default: `memory`)
+- `MONGO_URI` (requerido cuando `PERSISTENCE_BACKEND=mongo`)
+
+Ejemplo para Mongo local:
+
+```bash
+export PERSISTENCE_BACKEND=mongo
+export MONGO_URI='mongodb://root:password@localhost:27017/?authSource=admin'
+cargo run
+```
+
 ## Autenticacion
 
 ### Header

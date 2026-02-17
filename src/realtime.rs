@@ -2,7 +2,10 @@ use std::{collections::HashMap, sync::Arc};
 
 use axum::{
     Router,
-    extract::{State, WebSocketUpgrade, ws::{Message, WebSocket}},
+    extract::{
+        State, WebSocketUpgrade,
+        ws::{Message, WebSocket},
+    },
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::get,
@@ -168,7 +171,9 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, context: AuthCont
         }),
     };
     if socket
-        .send(Message::Text(serde_json::to_string(&welcome).unwrap_or_default()))
+        .send(Message::Text(
+            serde_json::to_string(&welcome).unwrap_or_default(),
+        ))
         .await
         .is_err()
     {
@@ -265,7 +270,13 @@ async fn handle_client_text(
                     json!({ "channel_id": message.channel_id, "client_msg_id": command.client_msg_id.clone() }),
                 )
                 .await;
-            send_ack(socket, "SEND_MESSAGE", command.client_msg_id, json!({"message_id": message.id})).await?;
+            send_ack(
+                socket,
+                "SEND_MESSAGE",
+                command.client_msg_id,
+                json!({"message_id": message.id}),
+            )
+            .await?;
         }
         "EDIT_MESSAGE" => {
             let payload: EditMessagePayload = serde_json::from_value(command.payload.clone())
@@ -304,13 +315,25 @@ async fn handle_client_text(
                     json!({ "channel_id": message.channel_id, "client_msg_id": command.client_msg_id.clone() }),
                 )
                 .await;
-            send_ack(socket, "EDIT_MESSAGE", command.client_msg_id, json!({"message_id": message.id})).await?;
+            send_ack(
+                socket,
+                "EDIT_MESSAGE",
+                command.client_msg_id,
+                json!({"message_id": message.id}),
+            )
+            .await?;
         }
         "DELETE_MESSAGE" => {
             let payload: DeleteMessagePayload = serde_json::from_value(command.payload.clone())
                 .map_err(|_| ApiError::BadRequest("invalid DELETE_MESSAGE payload".to_string()))?;
-            let target = state.channels.get_message(context.workspace_id, payload.message_id).await?;
-            state.channels.delete_message(context, payload.message_id).await?;
+            let target = state
+                .channels
+                .get_message(context.workspace_id, payload.message_id)
+                .await?;
+            state
+                .channels
+                .delete_message(context, payload.message_id)
+                .await?;
             state
                 .realtime
                 .emit(
@@ -335,7 +358,13 @@ async fn handle_client_text(
                     json!({ "channel_id": target.channel_id, "client_msg_id": command.client_msg_id.clone() }),
                 )
                 .await;
-            send_ack(socket, "DELETE_MESSAGE", command.client_msg_id, json!({"message_id": payload.message_id})).await?;
+            send_ack(
+                socket,
+                "DELETE_MESSAGE",
+                command.client_msg_id,
+                json!({"message_id": payload.message_id}),
+            )
+            .await?;
         }
         "FETCH_MORE" => {
             let payload: FetchMorePayload = serde_json::from_value(command.payload.clone())
@@ -351,7 +380,13 @@ async fn handle_client_text(
                     },
                 )
                 .await?;
-            send_ack(socket, "FETCH_MORE", command.client_msg_id, serde_json::to_value(page).unwrap_or_default()).await?;
+            send_ack(
+                socket,
+                "FETCH_MORE",
+                command.client_msg_id,
+                serde_json::to_value(page).unwrap_or_default(),
+            )
+            .await?;
         }
         "FETCH_THREAD" => {
             let payload: FetchThreadPayload = serde_json::from_value(command.payload.clone())
@@ -410,7 +445,13 @@ async fn handle_client_text(
                     json!({ "emoji": update.emoji, "client_msg_id": command.client_msg_id.clone() }),
                 )
                 .await;
-            send_ack(socket, "ADD_REACTION", command.client_msg_id, json!({"ok": true})).await?;
+            send_ack(
+                socket,
+                "ADD_REACTION",
+                command.client_msg_id,
+                json!({"ok": true}),
+            )
+            .await?;
         }
         "REMOVE_REACTION" => {
             let payload: ReactionPayload = serde_json::from_value(command.payload.clone())
@@ -443,7 +484,13 @@ async fn handle_client_text(
                     json!({ "emoji": update.emoji, "client_msg_id": command.client_msg_id.clone() }),
                 )
                 .await;
-            send_ack(socket, "REMOVE_REACTION", command.client_msg_id, json!({"ok": true})).await?;
+            send_ack(
+                socket,
+                "REMOVE_REACTION",
+                command.client_msg_id,
+                json!({"ok": true}),
+            )
+            .await?;
         }
         other => {
             return Err(ApiError::BadRequest(format!(
@@ -478,7 +525,13 @@ pub fn make_event(
     correlation_id: Option<String>,
     payload: Value,
 ) -> WsEventEnvelope {
-    event(event_type, workspace_id, channel_id, correlation_id, payload)
+    event(
+        event_type,
+        workspace_id,
+        channel_id,
+        correlation_id,
+        payload,
+    )
 }
 
 async fn send_ack(
@@ -500,7 +553,9 @@ async fn send_ack(
     };
 
     socket
-        .send(Message::Text(serde_json::to_string(&ack).unwrap_or_default()))
+        .send(Message::Text(
+            serde_json::to_string(&ack).unwrap_or_default(),
+        ))
         .await
         .map_err(|_| ApiError::Internal("failed to send websocket ack".to_string()))?;
     Ok(())

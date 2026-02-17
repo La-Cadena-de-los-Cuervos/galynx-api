@@ -112,7 +112,10 @@ impl AttachmentService {
         let upload_id = Uuid::new_v4();
         let key = format!(
             "workspace/{}/channel/{}/uploads/{}-{}",
-            context.workspace_id, payload.channel_id, upload_id, sanitize_filename(&filename)
+            context.workspace_id,
+            payload.channel_id,
+            upload_id,
+            sanitize_filename(&filename)
         );
         let pending = PendingUploadRecord {
             workspace_id: context.workspace_id,
@@ -146,7 +149,9 @@ impl AttachmentService {
             .storage
             .take_pending_upload(&payload.upload_id)
             .await
-            .ok_or_else(|| ApiError::NotFound("upload_id not found or already committed".to_string()))?;
+            .ok_or_else(|| {
+                ApiError::NotFound("upload_id not found or already committed".to_string())
+            })?;
         if pending.workspace_id != context.workspace_id {
             return Err(ApiError::NotFound("upload_id not found".to_string()));
         }
@@ -156,7 +161,9 @@ impl AttachmentService {
             ));
         }
         if pending.expires_at < now {
-            return Err(ApiError::BadRequest("presigned upload has expired".to_string()));
+            return Err(ApiError::BadRequest(
+                "presigned upload has expired".to_string(),
+            ));
         }
 
         let attachment = AttachmentRecordStore {
@@ -326,7 +333,10 @@ pub(crate) async fn get_attachment(
         .auth
         .authenticate_headers(&headers, &state.config.jwt_secret)
         .await?;
-    let response = state.attachments.get(context.workspace_id, attachment_id).await?;
+    let response = state
+        .attachments
+        .get(context.workspace_id, attachment_id)
+        .await?;
     Ok(Json(response))
 }
 

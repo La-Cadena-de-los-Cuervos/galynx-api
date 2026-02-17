@@ -5,9 +5,9 @@ mod auth;
 mod channels;
 mod config;
 mod errors;
+mod rate_limit;
 mod reactions;
 mod realtime;
-mod rate_limit;
 mod storage;
 mod threads;
 

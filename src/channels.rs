@@ -94,7 +94,10 @@ pub fn router() -> Router<AppState> {
             "/api/v1/channels/:id/messages",
             get(list_messages).post(create_message),
         )
-        .route("/api/v1/messages/:id", patch(update_message).delete(delete_message))
+        .route(
+            "/api/v1/messages/:id",
+            patch(update_message).delete(delete_message),
+        )
 }
 
 impl ChannelService {
@@ -109,11 +112,12 @@ impl ChannelService {
     pub async fn list_channels(&self, workspace_id: Uuid) -> Vec<ChannelResponse> {
         self.ensure_bootstrap_seed().await;
         let channels = self.storage.list_channels(workspace_id).await;
-        let mut items: Vec<ChannelResponse> = channels
-            .iter()
-            .map(ChannelResponse::from)
-            .collect();
-        items.sort_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.id.cmp(&b.id)));
+        let mut items: Vec<ChannelResponse> = channels.iter().map(ChannelResponse::from).collect();
+        items.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.id.cmp(&b.id))
+        });
         items
     }
 
@@ -130,7 +134,9 @@ impl ChannelService {
         }
 
         if self.storage.channel_name_exists(workspace_id, &name).await {
-            return Err(ApiError::BadRequest("channel name already exists".to_string()));
+            return Err(ApiError::BadRequest(
+                "channel name already exists".to_string(),
+            ));
         }
 
         let channel = ChannelRecordStore {
@@ -172,7 +178,8 @@ impl ChannelService {
             return Err(ApiError::BadRequest("message body is required".to_string()));
         }
 
-        self.assert_channel_access(context.workspace_id, channel_id).await?;
+        self.assert_channel_access(context.workspace_id, channel_id)
+            .await?;
 
         let message = MessageRecordStore {
             id: Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
@@ -211,9 +218,7 @@ impl ChannelService {
         let messages = self.storage.list_messages(workspace_id).await;
         let mut channel_messages: Vec<&MessageRecordStore> = messages
             .iter()
-            .filter(|message| {
-                message.channel_id == channel_id && message.deleted_at.is_none()
-            })
+            .filter(|message| message.channel_id == channel_id && message.deleted_at.is_none())
             .collect();
         channel_messages.sort_by(|a, b| {
             b.created_at
@@ -304,7 +309,11 @@ impl ChannelService {
         Ok(())
     }
 
-    pub async fn get_message(&self, workspace_id: Uuid, message_id: Uuid) -> ApiResult<MessageResponse> {
+    pub async fn get_message(
+        &self,
+        workspace_id: Uuid,
+        message_id: Uuid,
+    ) -> ApiResult<MessageResponse> {
         self.ensure_bootstrap_seed().await;
         let message = self
             .storage
@@ -317,7 +326,11 @@ impl ChannelService {
         Ok(MessageResponse::from(&message))
     }
 
-    pub async fn ensure_channel_access(&self, workspace_id: Uuid, channel_id: Uuid) -> ApiResult<()> {
+    pub async fn ensure_channel_access(
+        &self,
+        workspace_id: Uuid,
+        channel_id: Uuid,
+    ) -> ApiResult<()> {
         self.assert_channel_access(workspace_id, channel_id).await
     }
 
@@ -341,10 +354,9 @@ impl ChannelService {
         let mut reply_count = 0usize;
         let mut last_reply_at = None;
         let mut participants = vec![root_message.sender_id];
-        for message in messages
-            .iter()
-            .filter(|message| message.thread_root_id == Some(root_id) && message.deleted_at.is_none())
-        {
+        for message in messages.iter().filter(|message| {
+            message.thread_root_id == Some(root_id) && message.deleted_at.is_none()
+        }) {
             reply_count += 1;
             if last_reply_at.is_none_or(|last| message.created_at > last) {
                 last_reply_at = Some(message.created_at);
@@ -446,7 +458,8 @@ impl ChannelService {
         if workspace_id != context.workspace_id {
             return Err(ApiError::NotFound("thread root not found".to_string()));
         }
-        self.assert_channel_access(context.workspace_id, channel_id).await?;
+        self.assert_channel_access(context.workspace_id, channel_id)
+            .await?;
 
         let reply = MessageRecordStore {
             id: Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
@@ -492,6 +505,12 @@ impl ChannelService {
     }
 
     async fn ensure_bootstrap_seed(&self) {
+        if matches!(
+            self.storage.backend(),
+            crate::storage::PersistenceBackend::Mongo
+        ) {
+            return;
+        }
         let has_bootstrap_channel = !self
             .storage
             .list_channels(self.bootstrap_workspace_id)

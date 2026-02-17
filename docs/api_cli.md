@@ -7,6 +7,44 @@ Este documento define como consumir `galynx-api` desde un CLI.
 - Base URL local: `http://localhost:3000`
 - Prefijo: `/api/v1`
 
+## Variables de entorno del API (backend)
+
+- `PORT` (default: `3000`)
+- `JWT_SECRET` (default: `dev-only-change-me-in-prod`)
+- `ACCESS_TTL_MINUTES` (default: `15`)
+- `REFRESH_TTL_DAYS` (default: `30`)
+- `BOOTSTRAP_EMAIL` (default: `owner@galynx.local`)
+- `BOOTSTRAP_PASSWORD` (default: `ChangeMe123!`)
+- `PERSISTENCE_BACKEND` (`memory` o `mongo`, default: `memory`)
+- `MONGO_URI` (requerido cuando `PERSISTENCE_BACKEND=mongo`)
+
+Ejemplo para Mongo local:
+
+```bash
+export PERSISTENCE_BACKEND=mongo
+export MONGO_URI='mongodb://root:password@localhost:27017/?authSource=admin'
+cargo run
+```
+
+## Ejecucion
+
+Desde este repo:
+
+```bash
+cargo run --bin galynx -- --help
+```
+
+Ejemplos:
+
+```bash
+cargo run --bin galynx -- auth login --email owner@galynx.local --password 'ChangeMe123!'
+cargo run --bin galynx -- auth me
+cargo run --bin galynx -- channels list
+cargo run --bin galynx -- messages send --channel <channel_id> --body "hola"
+cargo run --bin galynx -- threads get <root_id>
+cargo run --bin galynx -- audit list --limit 20
+```
+
 ## Autenticacion en CLI
 
 ## Flujo recomendado
@@ -74,6 +112,27 @@ Este documento define como consumir `galynx-api` desde un CLI.
 - `galynx attachments commit --upload-id <id> [--message-id <id>]`
 - `galynx attachments get <attachment_id>`
 - `galynx audit list [--cursor <cursor>] [--limit <n>]`
+
+## Comandos ya implementados
+
+- `auth login`
+- `auth me`
+- `auth refresh`
+- `auth logout`
+- `channels list`
+- `channels create`
+- `channels delete`
+- `messages list`
+- `messages send`
+- `messages edit`
+- `messages delete`
+- `threads get`
+- `threads replies`
+- `threads reply`
+- `attachments presign`
+- `attachments commit`
+- `attachments get`
+- `audit list`
 
 ## Contratos clave para CLI
 

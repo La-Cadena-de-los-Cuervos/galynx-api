@@ -429,7 +429,10 @@ impl Storage {
     }
 
     pub async fn insert_channel(&self, channel: ChannelRecordStore) {
-        self.channels.write().await.insert(channel.id, channel.clone());
+        self.channels
+            .write()
+            .await
+            .insert(channel.id, channel.clone());
         if let Some(mongo) = &self.mongo {
             let document = doc! {
                 "_id": channel.id.to_string(),
@@ -544,7 +547,10 @@ impl Storage {
     }
 
     pub async fn insert_message(&self, message: MessageRecordStore) {
-        self.messages.write().await.insert(message.id, message.clone());
+        self.messages
+            .write()
+            .await
+            .insert(message.id, message.clone());
         if let Some(mongo) = &self.mongo {
             let document = doc! {
                 "_id": message.id.to_string(),
@@ -687,7 +693,12 @@ impl Storage {
         }
 
         let normalized = email.trim().to_ascii_lowercase();
-        let user_id = self.auth_users_by_email.read().await.get(&normalized).copied()?;
+        let user_id = self
+            .auth_users_by_email
+            .read()
+            .await
+            .get(&normalized)
+            .copied()?;
         self.auth_users.read().await.get(&user_id).cloned()
     }
 
@@ -794,7 +805,11 @@ impl Storage {
         self.refresh_sessions.read().await.get(token_hash).cloned()
     }
 
-    pub async fn put_refresh_session(&self, token_hash: String, session: RefreshSessionRecordStore) {
+    pub async fn put_refresh_session(
+        &self,
+        token_hash: String,
+        session: RefreshSessionRecordStore,
+    ) {
         self.refresh_sessions
             .write()
             .await

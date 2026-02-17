@@ -9,7 +9,10 @@ use uuid::Uuid;
 
 use crate::{
     app::AppState,
-    channels::{CreateMessageRequest, MessageListResponse, MessageQuery, MessageResponse, ThreadSummaryResponse},
+    channels::{
+        CreateMessageRequest, MessageListResponse, MessageQuery, MessageResponse,
+        ThreadSummaryResponse,
+    },
     errors::{ApiResult, ErrorResponse},
     realtime,
 };

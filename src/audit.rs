@@ -80,7 +80,11 @@ impl AuditService {
         self.storage.append_audit_entry(entry).await;
     }
 
-    pub async fn list(&self, workspace_id: Uuid, query: &AuditQuery) -> ApiResult<AuditListResponse> {
+    pub async fn list(
+        &self,
+        workspace_id: Uuid,
+        query: &AuditQuery,
+    ) -> ApiResult<AuditListResponse> {
         let limit = query.limit.unwrap_or(50).clamp(1, 100);
         let before = query
             .cursor
