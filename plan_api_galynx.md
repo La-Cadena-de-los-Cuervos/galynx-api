@@ -140,3 +140,27 @@ Construir `galynx-api` como un monolito modular en Rust que cubra auth, roles, c
 - Refresh: stateful con rotación y revocación.
 - Paginación: cursor por `created_at` + `_id`.
 - Observabilidad: logs + métricas + trazas OTel.
+
+## Estado actual (checkpoint 2026-02-17)
+
+### Funcional hoy
+- API HTTP v1 operativa en Axum.
+- Auth: `login`, `refresh`, `logout`, `me`.
+- Canales y mensajes: listar, crear, editar, borrar, paginación por cursor.
+- Threads: resumen, replies, crear reply.
+- Attachments: `presign`, `commit`, `get` (flujo lógico de metadata).
+- Auditoría: escritura y consulta.
+- WebSocket: conexión autenticada, comandos y eventos principales.
+- Persistencia Mongo operativa (con configuración por env).
+- CLI funcional para operaciones principales.
+- Empaquetado Docker (`Dockerfile` + `docker-compose.yml`).
+
+### Pendiente para siguiente fase
+- Integrar Redis real para escalado WS (pub/sub entre réplicas).
+- Integrar MinIO/S3 real para URLs prefirmadas y transferencia real de archivos.
+- Implementar deduplicación/idempotencia WS persistente por `client_msg_id`.
+- Completar modelo de datos objetivo (workspaces/channel_members y privados con membresía explícita).
+- Crear índices y TTL formales en Mongo (uniques + expiraciones).
+- Agregar observabilidad avanzada (métricas y trazas OTel).
+- Completar CI bloqueante con integración/WS/e2e smoke.
+- Añadir bootstrap operativo formal (script/flujo de inicialización).
