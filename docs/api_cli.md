@@ -25,7 +25,8 @@ Este documento define como consumir `galynx-api` desde un CLI.
 - `OTEL_SAMPLE_RATIO` (default: `1.0`)
 - `S3_BUCKET` (opcional, habilita presign real de adjuntos)
 - `S3_REGION` (default: `us-east-1`)
-- `S3_ENDPOINT` (opcional, para RustFS/S3 compatible)
+- `S3_ENDPOINT` (opcional, endpoint interno S3/RustFS para el API)
+- `S3_PUBLIC_ENDPOINT` (opcional, endpoint publico para URLs prefirmadas)
 - `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` (opcionales)
 - `S3_FORCE_PATH_STYLE` (default: `true`, recomendado con RustFS)
 
@@ -41,7 +42,8 @@ export OTEL_SERVICE_NAME='galynx-api'
 export OTEL_SAMPLE_RATIO='1.0'
 export S3_BUCKET='galynx-attachments'
 export S3_REGION='us-east-1'
-export S3_ENDPOINT='http://localhost:9000'
+export S3_ENDPOINT='http://rustfs:9000'
+export S3_PUBLIC_ENDPOINT='http://localhost:9000'
 export S3_ACCESS_KEY_ID='rustfsadmin'
 export S3_SECRET_ACCESS_KEY='rustfsadmin'
 export S3_FORCE_PATH_STYLE='true'

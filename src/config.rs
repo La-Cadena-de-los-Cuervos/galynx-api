@@ -19,6 +19,7 @@ pub struct Config {
     pub s3_bucket: Option<String>,
     pub s3_region: String,
     pub s3_endpoint: Option<String>,
+    pub s3_public_endpoint: Option<String>,
     pub s3_access_key_id: Option<String>,
     pub s3_secret_access_key: Option<String>,
     pub s3_force_path_style: bool,
@@ -63,6 +64,7 @@ impl Config {
             s3_bucket: read_env("S3_BUCKET"),
             s3_region: read_env("S3_REGION").unwrap_or_else(|| "us-east-1".to_string()),
             s3_endpoint: read_env("S3_ENDPOINT"),
+            s3_public_endpoint: read_env("S3_PUBLIC_ENDPOINT"),
             s3_access_key_id: read_env("S3_ACCESS_KEY_ID"),
             s3_secret_access_key: read_env("S3_SECRET_ACCESS_KEY"),
             s3_force_path_style: read_env("S3_FORCE_PATH_STYLE")

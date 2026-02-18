@@ -37,7 +37,7 @@ pub struct AttachmentService {
 
 #[derive(Clone)]
 struct S3ObjectStorage {
-    client: S3Client,
+    presign_client: S3Client,
     bucket: String,
     region: String,
 }
@@ -291,17 +291,17 @@ impl S3ObjectStorage {
         }
 
         let shared_config = loader.load().await;
-        let mut s3_builder = S3ConfigBuilder::from(&shared_config);
-
-        if let Some(endpoint) = &config.s3_endpoint {
-            s3_builder = s3_builder.endpoint_url(endpoint);
-        }
-
-        s3_builder = s3_builder.force_path_style(config.s3_force_path_style);
-        let client = S3Client::from_conf(s3_builder.build());
+        let presign_client = build_s3_client(
+            &shared_config,
+            config
+                .s3_public_endpoint
+                .as_deref()
+                .or(config.s3_endpoint.as_deref()),
+            config.s3_force_path_style,
+        );
 
         Some(Self {
-            client,
+            presign_client,
             bucket,
             region: config.s3_region.clone(),
         })
@@ -310,17 +310,18 @@ impl S3ObjectStorage {
     async fn presign_upload_url(
         &self,
         key: &str,
-        content_type: &str,
-        size_bytes: u64,
+        _content_type: &str,
+        _size_bytes: u64,
     ) -> ApiResult<String> {
         let expires = Duration::from_secs(PRESIGN_TTL_SECONDS as u64);
+        // Keep presign upload compatible with S3-compatible providers (e.g. RustFS)
+        // that can be strict/inconsistent validating additional signed headers.
+        // We still validate metadata in API, but only sign host for upload URL.
         let presigned = self
-            .client
+            .presign_client
             .put_object()
             .bucket(&self.bucket)
             .key(key)
-            .content_type(content_type)
-            .content_length(size_bytes as i64)
             .presigned(
                 PresigningConfig::expires_in(expires)
                     .map_err(|error| ApiError::Internal(format!("invalid presign ttl: {error}")))?,
@@ -336,7 +337,7 @@ impl S3ObjectStorage {
     async fn presign_download_url(&self, key: &str) -> Result<String, String> {
         let expires = Duration::from_secs(DOWNLOAD_TTL_SECONDS as u64);
         let presigned = self
-            .client
+            .presign_client
             .get_object()
             .bucket(&self.bucket)
             .key(key)
@@ -346,6 +347,19 @@ impl S3ObjectStorage {
 
         Ok(presigned.uri().to_string())
     }
+}
+
+fn build_s3_client(
+    shared_config: &aws_config::SdkConfig,
+    endpoint: Option<&str>,
+    force_path_style: bool,
+) -> S3Client {
+    let mut s3_builder = S3ConfigBuilder::from(shared_config);
+    if let Some(endpoint) = endpoint {
+        s3_builder = s3_builder.endpoint_url(endpoint);
+    }
+    s3_builder = s3_builder.force_path_style(force_path_style);
+    S3Client::from_conf(s3_builder.build())
 }
 
 impl From<&AttachmentRecordStore> for AttachmentResponse {

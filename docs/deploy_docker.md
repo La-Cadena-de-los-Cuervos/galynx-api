@@ -80,6 +80,7 @@ docker run --rm -p 3000:3000 \
 - `OTEL_SAMPLE_RATIO` (default `1.0`)
 - `S3_BUCKET` (opcional, habilita presign real de adjuntos)
 - `S3_REGION` (default `us-east-1`)
-- `S3_ENDPOINT` (opcional, para RustFS/S3 compatible)
+- `S3_ENDPOINT` (opcional, endpoint interno S3/RustFS para el API)
+- `S3_PUBLIC_ENDPOINT` (opcional, endpoint publico para URLs prefirmadas)
 - `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` (opcionales)
 - `S3_FORCE_PATH_STYLE` (default `true`, recomendado con RustFS)
