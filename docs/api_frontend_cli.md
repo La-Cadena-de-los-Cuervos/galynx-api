@@ -518,6 +518,9 @@ Respuesta tipo `ACK`:
 }
 ```
 
+Para `SEND_MESSAGE`, la API aplica idempotencia por `(workspace_id, user_id, channel_id, client_msg_id)`.
+Si reenvias el mismo `client_msg_id`, el ACK devuelve el mismo `message_id` y puede incluir `"deduped": true`.
+
 ### Errores WS
 
 La API envia evento `ERROR`:

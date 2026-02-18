@@ -141,7 +141,7 @@ Construir `galynx-api` como un monolito modular en Rust que cubra auth, roles, c
 - Paginación: cursor por `created_at` + `_id`.
 - Observabilidad: logs + métricas + trazas OTel.
 
-## Estado actual (checkpoint 2026-02-17)
+## Estado actual (checkpoint 2026-02-18)
 
 ### Funcional hoy
 - API HTTP v1 operativa en Axum.
@@ -151,16 +151,17 @@ Construir `galynx-api` como un monolito modular en Rust que cubra auth, roles, c
 - Attachments: `presign`, `commit`, `get` (flujo lógico de metadata).
 - Auditoría: escritura y consulta.
 - WebSocket: conexión autenticada, comandos y eventos principales.
+- WebSocket con bridge Redis opcional (`REDIS_URL`) para fan-out entre réplicas.
+- Idempotencia WS implementada para `SEND_MESSAGE` por `(workspace_id, user_id, channel_id, client_msg_id)`.
+- Índices Mongo base creados al arranque (unique + consulta) y TTL para expiración de `refresh_sessions`.
 - Persistencia Mongo operativa (con configuración por env).
 - CLI funcional para operaciones principales.
 - Empaquetado Docker (`Dockerfile` + `docker-compose.yml`).
 
 ### Pendiente para siguiente fase
-- Integrar Redis real para escalado WS (pub/sub entre réplicas).
 - Integrar MinIO/S3 real para URLs prefirmadas y transferencia real de archivos.
-- Implementar deduplicación/idempotencia WS persistente por `client_msg_id`.
+- Extender deduplicación WS por `client_msg_id` al resto de comandos que aplique.
 - Completar modelo de datos objetivo (workspaces/channel_members y privados con membresía explícita).
-- Crear índices y TTL formales en Mongo (uniques + expiraciones).
 - Agregar observabilidad avanzada (métricas y trazas OTel).
 - Completar CI bloqueante con integración/WS/e2e smoke.
 - Añadir bootstrap operativo formal (script/flujo de inicialización).

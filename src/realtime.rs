@@ -392,6 +392,36 @@ async fn handle_client_text(
         "SEND_MESSAGE" => {
             let payload: SendMessagePayload = serde_json::from_value(command.payload.clone())
                 .map_err(|_| ApiError::BadRequest("invalid SEND_MESSAGE payload".to_string()))?;
+            let dedup_client_msg_id = normalize_client_msg_id(command.client_msg_id.as_deref())?;
+            if let Some(client_msg_id) = dedup_client_msg_id.as_deref() {
+                if let Some(existing_message_id) = state
+                    .storage
+                    .get_ws_command_message_id(
+                        context.workspace_id,
+                        context.user_id,
+                        payload.channel_id,
+                        client_msg_id,
+                    )
+                    .await
+                {
+                    if state
+                        .channels
+                        .get_message(context.workspace_id, existing_message_id)
+                        .await
+                        .is_ok()
+                    {
+                        send_ack(
+                            socket,
+                            "SEND_MESSAGE",
+                            command.client_msg_id,
+                            json!({"message_id": existing_message_id, "deduped": true}),
+                        )
+                        .await?;
+                        return Ok(());
+                    }
+                }
+            }
+
             let message = state
                 .channels
                 .create_message(
@@ -402,6 +432,19 @@ async fn handle_client_text(
                     },
                 )
                 .await?;
+            if let Some(client_msg_id) = dedup_client_msg_id.as_deref() {
+                state
+                    .storage
+                    .put_ws_command_message_id(
+                        context.workspace_id,
+                        context.user_id,
+                        payload.channel_id,
+                        client_msg_id,
+                        message.id,
+                        Utc::now().timestamp_millis(),
+                    )
+                    .await;
+            }
             state
                 .realtime
                 .emit(
@@ -736,5 +779,40 @@ fn status_from_error(error: &ApiError) -> u16 {
         ApiError::TooManyRequests(_) => StatusCode::TOO_MANY_REQUESTS.as_u16(),
         ApiError::NotFound(_) => StatusCode::NOT_FOUND.as_u16(),
         ApiError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR.as_u16(),
+    }
+}
+
+fn normalize_client_msg_id(value: Option<&str>) -> ApiResult<Option<String>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let normalized = value.trim();
+    if normalized.is_empty() {
+        return Err(ApiError::BadRequest(
+            "client_msg_id must not be empty".to_string(),
+        ));
+    }
+    if normalized.len() > 128 {
+        return Err(ApiError::BadRequest(
+            "client_msg_id is too long".to_string(),
+        ));
+    }
+    Ok(Some(normalized.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_client_msg_id;
+
+    #[test]
+    fn normalize_client_msg_id_accepts_trimmed_value() {
+        let value = normalize_client_msg_id(Some("  abc-123  ")).expect("should be valid");
+        assert_eq!(value.as_deref(), Some("abc-123"));
+    }
+
+    #[test]
+    fn normalize_client_msg_id_rejects_empty_value() {
+        let error = normalize_client_msg_id(Some("   ")).expect_err("should fail");
+        assert_eq!(error.to_string(), "client_msg_id must not be empty");
     }
 }

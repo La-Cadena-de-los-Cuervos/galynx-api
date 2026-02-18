@@ -436,6 +436,11 @@ Respuesta ACK:
 }
 ```
 
+Nota de idempotencia:
+
+- En `SEND_MESSAGE`, si reutilizas el mismo `client_msg_id` para el mismo `channel_id` y usuario, la API responde el mismo `message_id` (sin crear duplicado).
+- En ese caso el ACK puede incluir `"deduped": true` en `payload.result`.
+
 Error WS:
 
 ```json

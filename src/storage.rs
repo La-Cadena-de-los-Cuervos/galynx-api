@@ -4,8 +4,9 @@ use std::{
 };
 
 use mongodb::{
-    Client, Collection,
-    bson::{Bson, Document, doc, from_bson, to_bson},
+    Client, Collection, IndexModel,
+    bson::{Bson, DateTime as BsonDateTime, Document, doc, from_bson, to_bson},
+    options::IndexOptions,
 };
 use serde_json::Value;
 use tokio::sync::RwLock;
@@ -39,6 +40,7 @@ pub struct Storage {
     auth_users_by_email: Arc<RwLock<HashMap<String, Uuid>>>,
     auth_memberships: Arc<RwLock<HashMap<(Uuid, Uuid), String>>>,
     refresh_sessions: Arc<RwLock<HashMap<String, RefreshSessionRecordStore>>>,
+    ws_command_dedup: Arc<RwLock<HashMap<(Uuid, Uuid, Uuid, String), Uuid>>>,
 }
 
 #[derive(Clone)]
@@ -52,6 +54,7 @@ struct MongoState {
     auth_users: Collection<Document>,
     auth_memberships: Collection<Document>,
     refresh_sessions: Collection<Document>,
+    ws_command_dedup: Collection<Document>,
 }
 
 #[derive(Debug, Clone)]
@@ -146,7 +149,7 @@ impl Storage {
                 .ok_or(StorageInitError::MissingMongoUri)?;
             let client = Client::with_uri_str(uri).await?;
             let database = client.database("galynx");
-            Some(MongoState {
+            let state = MongoState {
                 audit_entries: database.collection::<Document>("audit_log"),
                 pending_uploads: database.collection::<Document>("pending_uploads"),
                 attachments: database.collection::<Document>("attachments"),
@@ -156,7 +159,10 @@ impl Storage {
                 auth_users: database.collection::<Document>("auth_users"),
                 auth_memberships: database.collection::<Document>("auth_memberships"),
                 refresh_sessions: database.collection::<Document>("refresh_sessions"),
-            })
+                ws_command_dedup: database.collection::<Document>("ws_command_dedup"),
+            };
+            ensure_mongo_indexes(&state).await?;
+            Some(state)
         } else {
             None
         };
@@ -174,6 +180,7 @@ impl Storage {
             auth_users_by_email: Arc::new(RwLock::new(HashMap::new())),
             auth_memberships: Arc::new(RwLock::new(HashMap::new())),
             refresh_sessions: Arc::new(RwLock::new(HashMap::new())),
+            ws_command_dedup: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 
@@ -819,6 +826,7 @@ impl Storage {
                 "_id": token_hash.clone(),
                 "user_id": session.user_id.to_string(),
                 "expires_at": session.expires_at,
+                "expires_at_dt": BsonDateTime::from_millis(session.expires_at * 1000),
                 "revoked_at": session.revoked_at,
                 "replaced_by_hash": session.replaced_by_hash,
             };
@@ -841,6 +849,190 @@ impl Storage {
             .await;
         Some(session)
     }
+
+    pub async fn get_ws_command_message_id(
+        &self,
+        workspace_id: Uuid,
+        user_id: Uuid,
+        channel_id: Uuid,
+        client_msg_id: &str,
+    ) -> Option<Uuid> {
+        let dedup_key = (
+            workspace_id,
+            user_id,
+            channel_id,
+            client_msg_id.trim().to_string(),
+        );
+
+        if let Some(mongo) = &self.mongo {
+            let mongo_id = format!(
+                "{}:{}:{}:{}",
+                dedup_key.0, dedup_key.1, dedup_key.2, dedup_key.3
+            );
+            if let Ok(Some(document)) = mongo
+                .ws_command_dedup
+                .find_one(doc! { "_id": mongo_id })
+                .await
+            {
+                return uuid_field(&document, "message_id");
+            }
+        }
+
+        self.ws_command_dedup.read().await.get(&dedup_key).copied()
+    }
+
+    pub async fn put_ws_command_message_id(
+        &self,
+        workspace_id: Uuid,
+        user_id: Uuid,
+        channel_id: Uuid,
+        client_msg_id: &str,
+        message_id: Uuid,
+        created_at: i64,
+    ) {
+        let dedup_key = (
+            workspace_id,
+            user_id,
+            channel_id,
+            client_msg_id.trim().to_string(),
+        );
+        self.ws_command_dedup
+            .write()
+            .await
+            .insert(dedup_key.clone(), message_id);
+
+        if let Some(mongo) = &self.mongo {
+            let mongo_id = format!(
+                "{}:{}:{}:{}",
+                dedup_key.0, dedup_key.1, dedup_key.2, dedup_key.3
+            );
+            let document = doc! {
+                "_id": mongo_id.clone(),
+                "workspace_id": workspace_id.to_string(),
+                "user_id": user_id.to_string(),
+                "channel_id": channel_id.to_string(),
+                "client_msg_id": dedup_key.3,
+                "message_id": message_id.to_string(),
+                "created_at": created_at,
+            };
+            let _ = mongo
+                .ws_command_dedup
+                .delete_one(doc! { "_id": mongo_id })
+                .await;
+            let _ = mongo.ws_command_dedup.insert_one(document).await;
+        }
+    }
+}
+
+async fn ensure_mongo_indexes(state: &MongoState) -> Result<(), mongodb::error::Error> {
+    state
+        .auth_users
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "email": 1 })
+                .options(IndexOptions::builder().unique(true).build())
+                .build(),
+        )
+        .await?;
+
+    state
+        .auth_memberships
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "workspace_id": 1, "user_id": 1 })
+                .options(IndexOptions::builder().unique(true).build())
+                .build(),
+        )
+        .await?;
+    state
+        .auth_memberships
+        .create_index(IndexModel::builder().keys(doc! { "user_id": 1 }).build())
+        .await?;
+
+    state
+        .channels
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "workspace_id": 1, "name": 1 })
+                .options(IndexOptions::builder().unique(true).build())
+                .build(),
+        )
+        .await?;
+
+    state
+        .messages
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "channel_id": 1, "created_at": -1, "_id": -1 })
+                .build(),
+        )
+        .await?;
+    state
+        .messages
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "workspace_id": 1 })
+                .build(),
+        )
+        .await?;
+
+    state
+        .audit_entries
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "workspace_id": 1, "created_at": -1, "_id": -1 })
+                .build(),
+        )
+        .await?;
+
+    state
+        .refresh_sessions
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "user_id": 1, "expires_at": 1 })
+                .build(),
+        )
+        .await?;
+    state
+        .refresh_sessions
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "expires_at_dt": 1 })
+                .options(
+                    IndexOptions::builder()
+                        .expire_after(Some(std::time::Duration::from_secs(0)))
+                        .build(),
+                )
+                .build(),
+        )
+        .await?;
+
+    state
+        .reactions
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "message_id": 1, "emoji": 1, "user_id": 1 })
+                .options(IndexOptions::builder().unique(true).build())
+                .build(),
+        )
+        .await?;
+
+    state
+        .ws_command_dedup
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! {
+                    "workspace_id": 1,
+                    "user_id": 1,
+                    "channel_id": 1,
+                    "client_msg_id": 1
+                })
+                .options(IndexOptions::builder().unique(true).build())
+                .build(),
+        )
+        .await?;
+
+    Ok(())
 }
 
 fn uuid_field(document: &Document, key: &str) -> Option<Uuid> {
@@ -871,4 +1063,37 @@ fn optional_i64_field(document: &Document, key: &str) -> Option<i64> {
 
 fn bool_field(document: &Document, key: &str) -> Option<bool> {
     document.get_bool(key).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PersistenceBackend, Storage};
+    use uuid::Uuid;
+
+    #[tokio::test]
+    async fn ws_command_dedup_roundtrip_memory_backend() {
+        let storage = Storage::new(PersistenceBackend::Memory, None)
+            .await
+            .expect("memory storage should init");
+        let workspace_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+        let channel_id = Uuid::new_v4();
+        let message_id = Uuid::new_v4();
+
+        storage
+            .put_ws_command_message_id(
+                workspace_id,
+                user_id,
+                channel_id,
+                "client-1",
+                message_id,
+                1_700_000_000_000,
+            )
+            .await;
+
+        let found = storage
+            .get_ws_command_message_id(workspace_id, user_id, channel_id, "client-1")
+            .await;
+        assert_eq!(found, Some(message_id));
+    }
 }
