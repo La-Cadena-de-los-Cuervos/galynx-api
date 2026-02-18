@@ -168,7 +168,9 @@ impl ChannelService {
         let response = ChannelResponse::from(&channel);
         self.storage.insert_channel(channel.clone()).await;
         if channel.is_private {
-            self.storage.add_channel_member(channel.id, created_by).await;
+            self.storage
+                .add_channel_member(channel.id, created_by)
+                .await;
         }
         Ok(response)
     }
@@ -228,7 +230,10 @@ impl ChannelService {
             return Err(ApiError::NotFound("channel not found".to_string()));
         }
 
-        let membership = self.storage.get_membership_role(workspace_id, user_id).await;
+        let membership = self
+            .storage
+            .get_membership_role(workspace_id, user_id)
+            .await;
         if membership.is_none() {
             return Err(ApiError::BadRequest(
                 "user does not belong to workspace".to_string(),
@@ -253,7 +258,9 @@ impl ChannelService {
         if channel.workspace_id != workspace_id {
             return Err(ApiError::NotFound("channel not found".to_string()));
         }
-        self.storage.remove_channel_member(channel_id, user_id).await;
+        self.storage
+            .remove_channel_member(channel_id, user_id)
+            .await;
         Ok(())
     }
 
@@ -416,7 +423,11 @@ impl ChannelService {
         Ok(MessageResponse::from(&message))
     }
 
-    pub async fn ensure_channel_access(&self, context: &AuthContext, channel_id: Uuid) -> ApiResult<()> {
+    pub async fn ensure_channel_access(
+        &self,
+        context: &AuthContext,
+        channel_id: Uuid,
+    ) -> ApiResult<()> {
         self.assert_channel_access(context, channel_id).await
     }
 
@@ -555,7 +566,11 @@ impl ChannelService {
         Ok(response)
     }
 
-    async fn assert_channel_access(&self, context: &AuthContext, channel_id: Uuid) -> ApiResult<()> {
+    async fn assert_channel_access(
+        &self,
+        context: &AuthContext,
+        channel_id: Uuid,
+    ) -> ApiResult<()> {
         let channel = self
             .storage
             .get_channel(&channel_id)
@@ -582,7 +597,11 @@ impl ChannelService {
         Ok(())
     }
 
-    async fn assert_thread_root(&self, context: &AuthContext, root_id: Uuid) -> ApiResult<MessageRecordStore> {
+    async fn assert_thread_root(
+        &self,
+        context: &AuthContext,
+        root_id: Uuid,
+    ) -> ApiResult<MessageRecordStore> {
         let root = self
             .storage
             .get_message(&root_id)

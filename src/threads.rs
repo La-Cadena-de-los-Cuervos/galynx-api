@@ -44,10 +44,7 @@ pub(crate) async fn get_thread(
         .auth
         .authenticate_headers(&headers, &state.config.jwt_secret)
         .await?;
-    let summary = state
-        .channels
-        .thread_summary(&context, root_id)
-        .await?;
+    let summary = state.channels.thread_summary(&context, root_id).await?;
     Ok(Json(summary))
 }
 
@@ -113,10 +110,7 @@ pub(crate) async fn create_reply(
             json!({ "root_id": root_id, "channel_id": reply.channel_id }),
         )
         .await;
-    let summary = state
-        .channels
-        .thread_summary(&context, root_id)
-        .await?;
+    let summary = state.channels.thread_summary(&context, root_id).await?;
     state
         .realtime
         .emit(

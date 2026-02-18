@@ -26,6 +26,8 @@ pub enum StorageInitError {
     MongoInit(#[from] mongodb::error::Error),
 }
 
+type WsDedupKey = (Uuid, Uuid, Uuid, String);
+
 #[derive(Clone)]
 pub struct Storage {
     backend: PersistenceBackend,
@@ -41,7 +43,7 @@ pub struct Storage {
     auth_users_by_email: Arc<RwLock<HashMap<String, Uuid>>>,
     auth_memberships: Arc<RwLock<HashMap<(Uuid, Uuid), String>>>,
     refresh_sessions: Arc<RwLock<HashMap<String, RefreshSessionRecordStore>>>,
-    ws_command_dedup: Arc<RwLock<HashMap<(Uuid, Uuid, Uuid, String), Uuid>>>,
+    ws_command_dedup: Arc<RwLock<HashMap<WsDedupKey, Uuid>>>,
     ws_command_once: Arc<RwLock<HashSet<String>>>,
 }
 
@@ -546,7 +548,10 @@ impl Storage {
     }
 
     pub async fn add_channel_member(&self, channel_id: Uuid, user_id: Uuid) {
-        self.channel_members.write().await.insert((channel_id, user_id));
+        self.channel_members
+            .write()
+            .await
+            .insert((channel_id, user_id));
         if let Some(mongo) = &self.mongo {
             let id = format!("{channel_id}:{user_id}");
             let document = doc! {
@@ -590,17 +595,16 @@ impl Storage {
     }
 
     pub async fn is_channel_member(&self, channel_id: Uuid, user_id: Uuid) -> bool {
-        if let Some(mongo) = &self.mongo {
-            if let Ok(found) = mongo
+        if let Some(mongo) = &self.mongo
+            && let Ok(found) = mongo
                 .channel_members
                 .find_one(doc! {
                     "channel_id": channel_id.to_string(),
                     "user_id": user_id.to_string(),
                 })
                 .await
-            {
-                return found.is_some();
-            }
+        {
+            return found.is_some();
         }
 
         self.channel_members
@@ -610,7 +614,10 @@ impl Storage {
     }
 
     pub async fn remove_channel_member(&self, channel_id: Uuid, user_id: Uuid) {
-        self.channel_members.write().await.remove(&(channel_id, user_id));
+        self.channel_members
+            .write()
+            .await
+            .remove(&(channel_id, user_id));
         if let Some(mongo) = &self.mongo {
             let _ = mongo
                 .channel_members
@@ -636,14 +643,13 @@ impl Storage {
     }
 
     pub async fn channel_name_exists(&self, workspace_id: Uuid, name: &str) -> bool {
-        if let Some(mongo) = &self.mongo {
-            if let Ok(result) = mongo
+        if let Some(mongo) = &self.mongo
+            && let Ok(result) = mongo
                 .channels
                 .find_one(doc! { "workspace_id": workspace_id.to_string(), "name": name.to_ascii_lowercase() })
                 .await
-            {
-                return result.is_some();
-            }
+        {
+            return result.is_some();
         }
 
         self.channels.read().await.values().any(|channel| {
@@ -865,22 +871,20 @@ impl Storage {
     }
 
     pub async fn find_primary_membership(&self, user_id: Uuid) -> Option<(Uuid, String)> {
-        if let Some(mongo) = &self.mongo {
-            if let Ok(mut cursor) = mongo
+        if let Some(mongo) = &self.mongo
+            && let Ok(mut cursor) = mongo
                 .auth_memberships
                 .find(doc! { "user_id": user_id.to_string() })
                 .await
-            {
-                if let Ok(true) = cursor.advance().await {
-                    let Ok(document) = cursor.deserialize_current() else {
-                        return None;
-                    };
-                    return Some((
-                        uuid_field(&document, "workspace_id")?,
-                        string_field(&document, "role").unwrap_or_default(),
-                    ));
-                }
-            }
+            && let Ok(true) = cursor.advance().await
+        {
+            let Ok(document) = cursor.deserialize_current() else {
+                return None;
+            };
+            return Some((
+                uuid_field(&document, "workspace_id")?,
+                string_field(&document, "role").unwrap_or_default(),
+            ));
         }
 
         self.auth_memberships
@@ -1022,10 +1026,10 @@ impl Storage {
     }
 
     pub async fn has_ws_command_once(&self, key: &str) -> bool {
-        if let Some(mongo) = &self.mongo {
-            if let Ok(found) = mongo.ws_command_once.find_one(doc! { "_id": key }).await {
-                return found.is_some();
-            }
+        if let Some(mongo) = &self.mongo
+            && let Ok(found) = mongo.ws_command_once.find_one(doc! { "_id": key }).await
+        {
+            return found.is_some();
         }
         self.ws_command_once.read().await.contains(key)
     }
