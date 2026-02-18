@@ -25,13 +25,14 @@ use crate::{
     app::AppState,
     errors::{ApiError, ApiResult, ErrorResponse},
     rate_limit::client_ip_from_headers,
-    storage::{AuthUserRecordStore, RefreshSessionRecordStore, Storage},
+    storage::{AuthUserRecordStore, RefreshSessionRecordStore, Storage, WorkspaceRecordStore},
 };
 
 #[derive(Clone)]
 pub struct AuthService {
     storage: Arc<Storage>,
     bootstrap_workspace_id: Uuid,
+    bootstrap_workspace_name: String,
     bootstrap_user_id: Uuid,
     bootstrap_email: String,
     bootstrap_name: String,
@@ -72,6 +73,7 @@ struct AccessClaims {
 pub struct LoginRequest {
     pub email: String,
     pub password: String,
+    pub workspace_id: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -117,8 +119,14 @@ pub fn router() -> Router<AppState> {
 }
 
 impl AuthService {
-    pub fn new(storage: Arc<Storage>, bootstrap_email: &str, bootstrap_password: &str) -> Self {
+    pub fn new(
+        storage: Arc<Storage>,
+        bootstrap_workspace_name: &str,
+        bootstrap_email: &str,
+        bootstrap_password: &str,
+    ) -> Self {
         let normalized_email = bootstrap_email.to_ascii_lowercase();
+        let bootstrap_workspace_name = bootstrap_workspace_name.trim().to_string();
         let bootstrap_name = "Owner".to_string();
         let bootstrap_password_hash =
             hash_password(bootstrap_password).expect("failed to create bootstrap password hash");
@@ -128,6 +136,7 @@ impl AuthService {
         Self {
             storage,
             bootstrap_workspace_id,
+            bootstrap_workspace_name,
             bootstrap_user_id,
             bootstrap_email: normalized_email,
             bootstrap_name,
@@ -143,9 +152,23 @@ impl AuthService {
         self.bootstrap_user_id
     }
 
-    async fn primary_membership(&self, user_id: Uuid) -> Option<(Uuid, WorkspaceRole)> {
+    async fn primary_membership(
+        &self,
+        user_id: Uuid,
+        preferred_workspace_id: Option<Uuid>,
+    ) -> Option<(Uuid, WorkspaceRole)> {
         self.ensure_bootstrap_seed().await;
-        let (workspace_id, role) = self.storage.find_primary_membership(user_id).await?;
+        if let Some(workspace_id) = preferred_workspace_id {
+            let role = self
+                .storage
+                .get_membership_role(workspace_id, user_id)
+                .await?;
+            return Some((workspace_id, WorkspaceRole::from_storage_role(&role).ok()?));
+        }
+
+        let mut memberships = self.storage.list_user_memberships(user_id).await;
+        memberships.sort_by(|a, b| a.0.cmp(&b.0));
+        let (workspace_id, role) = memberships.into_iter().next()?;
         Some((workspace_id, WorkspaceRole::from_storage_role(&role).ok()?))
     }
 
@@ -153,6 +176,7 @@ impl AuthService {
         &self,
         email: &str,
         password: &str,
+        workspace_id: Option<Uuid>,
         jwt_secret: &str,
         access_ttl_minutes: i64,
         refresh_ttl_days: i64,
@@ -172,13 +196,20 @@ impl AuthService {
             .verify_password(password.as_bytes(), &parsed_hash)
             .map_err(|_| ApiError::Unauthorized("invalid credentials".to_string()))?;
 
-        self.issue_tokens(user, jwt_secret, access_ttl_minutes, refresh_ttl_days)
-            .await
+        self.issue_tokens(
+            user,
+            workspace_id,
+            jwt_secret,
+            access_ttl_minutes,
+            refresh_ttl_days,
+        )
+        .await
     }
 
     async fn issue_tokens(
         &self,
         user: AuthUserRecordStore,
+        preferred_workspace_id: Option<Uuid>,
         jwt_secret: &str,
         access_ttl_minutes: i64,
         refresh_ttl_days: i64,
@@ -186,9 +217,12 @@ impl AuthService {
         let now = Utc::now();
         let access_exp = now + Duration::minutes(access_ttl_minutes);
         let refresh_exp = now + Duration::days(refresh_ttl_days);
-        let (workspace_id, role) = self.primary_membership(user.id).await.ok_or_else(|| {
-            ApiError::Unauthorized("user has no workspace membership".to_string())
-        })?;
+        let (workspace_id, role) = self
+            .primary_membership(user.id, preferred_workspace_id)
+            .await
+            .ok_or_else(|| {
+                ApiError::Unauthorized("user has no workspace membership".to_string())
+            })?;
 
         let claims = AccessClaims {
             sub: user.id.to_string(),
@@ -211,6 +245,7 @@ impl AuthService {
         let refresh_hash = token_hash(&refresh_token);
         let session = RefreshSessionRecordStore {
             user_id: user.id,
+            workspace_id,
             expires_at: refresh_exp.timestamp(),
             revoked_at: None,
             replaced_by_hash: None,
@@ -280,6 +315,7 @@ impl AuthService {
         let refresh_exp = Utc::now() + Duration::days(refresh_ttl_days);
         let rotated = RefreshSessionRecordStore {
             user_id: snapshot.user_id,
+            workspace_id: snapshot.workspace_id,
             expires_at: refresh_exp.timestamp(),
             revoked_at: None,
             replaced_by_hash: None,
@@ -295,9 +331,12 @@ impl AuthService {
             .ok_or_else(|| ApiError::Unauthorized("user not found".to_string()))?;
 
         let access_exp = Utc::now() + Duration::minutes(access_ttl_minutes);
-        let (workspace_id, role) = self.primary_membership(user.id).await.ok_or_else(|| {
-            ApiError::Unauthorized("user has no workspace membership".to_string())
-        })?;
+        let (workspace_id, role) = self
+            .primary_membership(user.id, Some(snapshot.workspace_id))
+            .await
+            .ok_or_else(|| {
+                ApiError::Unauthorized("user has no workspace membership".to_string())
+            })?;
         let claims = AccessClaims {
             sub: user.id.to_string(),
             email: user.email,
@@ -422,6 +461,14 @@ impl AuthService {
                 .is_none()
             {
                 self.storage
+                    .put_workspace(WorkspaceRecordStore {
+                        id: self.bootstrap_workspace_id,
+                        name: self.bootstrap_workspace_name.clone(),
+                        created_by: existing.id,
+                        created_at: Utc::now().timestamp_millis(),
+                    })
+                    .await;
+                self.storage
                     .put_membership_role(self.bootstrap_workspace_id, existing.id, "owner")
                     .await;
             }
@@ -435,6 +482,14 @@ impl AuthService {
             password_hash: self.bootstrap_password_hash.clone(),
         };
         self.storage.put_auth_user(user).await;
+        self.storage
+            .put_workspace(WorkspaceRecordStore {
+                id: self.bootstrap_workspace_id,
+                name: self.bootstrap_workspace_name.clone(),
+                created_by: self.bootstrap_user_id,
+                created_at: Utc::now().timestamp_millis(),
+            })
+            .await;
         self.storage
             .put_membership_role(self.bootstrap_workspace_id, self.bootstrap_user_id, "owner")
             .await;
@@ -506,6 +561,7 @@ pub(crate) async fn login(
         .login(
             &payload.email,
             &payload.password,
+            payload.workspace_id,
             &state.config.jwt_secret,
             state.config.access_ttl_minutes,
             state.config.refresh_ttl_days,
@@ -644,11 +700,12 @@ mod tests {
                     .await
                     .expect("memory storage should init"),
             ),
+            "Galynx",
             "owner@galynx.local",
             "ChangeMe123!",
         );
         let first = service
-            .login("owner@galynx.local", "ChangeMe123!", "secret", 15, 30)
+            .login("owner@galynx.local", "ChangeMe123!", None, "secret", 15, 30)
             .await
             .expect("login should succeed");
 

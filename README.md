@@ -28,7 +28,9 @@ Estado actual:
 - `src/audit.rs`: auditoría.
 - `src/realtime.rs`: WebSocket.
 - `src/storage.rs`: backend memory/mongo.
+- `src/observability.rs`: métricas HTTP y middleware de observabilidad.
 - `src/bin/galynx.rs`: CLI.
+- `src/bin/bootstrap.rs`: bootstrap operativo idempotente.
 
 ## Requisitos
 
@@ -42,11 +44,16 @@ Estado actual:
 - `JWT_SECRET` (default: `dev-only-change-me-in-prod`)
 - `ACCESS_TTL_MINUTES` (default: `15`)
 - `REFRESH_TTL_DAYS` (default: `30`)
+- `BOOTSTRAP_WORKSPACE_NAME` (default: `Galynx`)
 - `BOOTSTRAP_EMAIL` (default: `owner@galynx.local`)
 - `BOOTSTRAP_PASSWORD` (default: `ChangeMe123!`)
 - `PERSISTENCE_BACKEND` (`memory` o `mongo`, default: `memory`)
 - `MONGO_URI` (requerido cuando `PERSISTENCE_BACKEND=mongo`)
 - `REDIS_URL` (opcional, habilita pub/sub realtime entre réplicas)
+- `METRICS_ENABLED` (default: `true`, expone `GET /api/v1/metrics`)
+- `OTEL_EXPORTER_OTLP_ENDPOINT` (opcional, habilita export de trazas OTLP gRPC)
+- `OTEL_SERVICE_NAME` (default: `galynx-api`)
+- `OTEL_SAMPLE_RATIO` (default: `1.0`)
 - `S3_BUCKET` (opcional, habilita presign real de adjuntos)
 - `S3_REGION` (default: `us-east-1`)
 - `S3_ENDPOINT` (opcional, para MinIO u otro endpoint S3 compatible)
@@ -68,6 +75,10 @@ cargo run
 export PERSISTENCE_BACKEND=mongo
 export MONGO_URI='mongodb://root:password@localhost:27017/?authSource=admin'
 export REDIS_URL='redis://localhost:6379'
+export METRICS_ENABLED='true'
+export OTEL_EXPORTER_OTLP_ENDPOINT='http://localhost:4317'
+export OTEL_SERVICE_NAME='galynx-api'
+export OTEL_SAMPLE_RATIO='1.0'
 export S3_BUCKET='galynx-attachments'
 export S3_REGION='us-east-1'
 export S3_ENDPOINT='http://localhost:9000'
@@ -81,6 +92,7 @@ Health check:
 
 ```bash
 curl -sS http://localhost:3000/api/v1/health
+curl -sS http://localhost:3000/api/v1/metrics
 ```
 
 ## Ejecutar con Docker Compose
@@ -115,7 +127,14 @@ Flujo mínimo:
 ```bash
 cargo run --bin galynx -- auth login --email owner@galynx.local --password 'ChangeMe123!'
 cargo run --bin galynx -- auth me
+cargo run --bin galynx -- workspaces list
 cargo run --bin galynx -- channels list
+```
+
+Bootstrap operativo (idempotente):
+
+```bash
+cargo run --bin bootstrap
 ```
 
 ## Documentación

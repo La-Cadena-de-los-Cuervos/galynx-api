@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
-use axum::{Json, Router, extract::State, routing::get};
+use axum::{Json, Router, extract::State, middleware, routing::get};
 use serde::Serialize;
 use tower_http::trace::TraceLayer;
 use utoipa::{OpenApi, ToSchema};
 
 use crate::{
-    attachments, audit, auth, channels, config::Config, rate_limit, reactions, realtime, storage,
-    threads, users,
+    attachments, audit, auth, channels, config::Config, observability, rate_limit, reactions,
+    realtime, storage, threads, users, workspaces,
 };
 
 #[derive(Clone)]
@@ -22,6 +22,8 @@ pub struct AppState {
     pub reactions: Arc<reactions::ReactionService>,
     pub realtime: Arc<realtime::RealtimeHub>,
     pub users: Arc<users::UserService>,
+    pub workspaces: Arc<workspaces::WorkspaceService>,
+    pub metrics: Arc<observability::AppMetrics>,
 }
 
 pub async fn build_state(config: Config) -> AppState {
@@ -32,6 +34,7 @@ pub async fn build_state(config: Config) -> AppState {
     );
     let auth_service = auth::AuthService::new(
         storage.clone(),
+        &config.bootstrap_workspace_name,
         &config.bootstrap_email,
         &config.bootstrap_password,
     );
@@ -46,6 +49,8 @@ pub async fn build_state(config: Config) -> AppState {
     let reactions_service = reactions::ReactionService::new(storage.clone());
     let realtime_hub = realtime::RealtimeHub::new(config.redis_url.as_deref());
     let users_service = users::UserService::new(storage.clone());
+    let workspaces_service = workspaces::WorkspaceService::new(storage.clone());
+    let metrics = observability::AppMetrics::default();
     AppState {
         config: Arc::new(config),
         storage,
@@ -57,11 +62,15 @@ pub async fn build_state(config: Config) -> AppState {
         reactions: Arc::new(reactions_service),
         realtime: Arc::new(realtime_hub),
         users: Arc::new(users_service),
+        workspaces: Arc::new(workspaces_service),
+        metrics: Arc::new(metrics),
     }
 }
 
 pub fn router(state: AppState) -> Router {
-    Router::new()
+    let metrics_enabled = state.config.metrics_enabled;
+    let metrics_state = state.clone();
+    let mut router = Router::new()
         .route("/api/v1/health", get(health))
         .route("/api/v1/ready", get(ready))
         .route("/api/v1/openapi.json", get(openapi_spec))
@@ -72,7 +81,18 @@ pub fn router(state: AppState) -> Router {
         .merge(audit::router())
         .merge(realtime::router())
         .merge(users::router())
+        .merge(workspaces::router());
+
+    if metrics_enabled {
+        router = router.route("/api/v1/metrics", get(observability::metrics_handler));
+    }
+
+    router
         .with_state(state)
+        .layer(middleware::from_fn_with_state(
+            metrics_state,
+            observability::metrics_middleware,
+        ))
         .layer(TraceLayer::new_for_http())
 }
 
@@ -112,6 +132,7 @@ async fn openapi_spec() -> Json<utoipa::openapi::OpenApi> {
     paths(
         health,
         ready,
+        crate::observability::metrics_handler,
         crate::auth::login,
         crate::auth::refresh,
         crate::auth::logout,
@@ -135,7 +156,11 @@ async fn openapi_spec() -> Json<utoipa::openapi::OpenApi> {
         crate::audit::list_audit,
         crate::realtime::ws_upgrade,
         crate::users::list_users,
-        crate::users::create_user
+        crate::users::create_user,
+        crate::workspaces::list_workspaces,
+        crate::workspaces::create_workspace,
+        crate::workspaces::list_workspace_members,
+        crate::workspaces::onboard_workspace_member
     ),
     components(
         schemas(
@@ -166,6 +191,10 @@ async fn openapi_spec() -> Json<utoipa::openapi::OpenApi> {
             crate::realtime::WsEventEnvelope,
             crate::users::CreateUserRequest,
             crate::users::UserResponse,
+            crate::workspaces::WorkspaceResponse,
+            crate::workspaces::CreateWorkspaceRequest,
+            crate::workspaces::WorkspaceMemberResponse,
+            crate::workspaces::OnboardWorkspaceMemberRequest,
             crate::errors::ErrorResponse
         )
     ),

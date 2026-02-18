@@ -14,11 +14,16 @@ Este documento esta enfocado en integracion frontend (web/mobile) con `galynx-ap
 - `JWT_SECRET` (default: `dev-only-change-me-in-prod`)
 - `ACCESS_TTL_MINUTES` (default: `15`)
 - `REFRESH_TTL_DAYS` (default: `30`)
+- `BOOTSTRAP_WORKSPACE_NAME` (default: `Galynx`)
 - `BOOTSTRAP_EMAIL` (default: `owner@galynx.local`)
 - `BOOTSTRAP_PASSWORD` (default: `ChangeMe123!`)
 - `PERSISTENCE_BACKEND` (`memory` o `mongo`, default: `memory`)
 - `MONGO_URI` (requerido cuando `PERSISTENCE_BACKEND=mongo`)
 - `REDIS_URL` (opcional, habilita pub/sub realtime entre réplicas)
+- `METRICS_ENABLED` (default: `true`, expone `/api/v1/metrics`)
+- `OTEL_EXPORTER_OTLP_ENDPOINT` (opcional, habilita trazas OTLP gRPC)
+- `OTEL_SERVICE_NAME` (default: `galynx-api`)
+- `OTEL_SAMPLE_RATIO` (default: `1.0`)
 - `S3_BUCKET` (opcional, habilita presign real de adjuntos)
 - `S3_REGION` (default: `us-east-1`)
 - `S3_ENDPOINT` (opcional, para MinIO/S3 compatible)
@@ -31,6 +36,10 @@ Ejemplo para Mongo local:
 export PERSISTENCE_BACKEND=mongo
 export MONGO_URI='mongodb://root:password@localhost:27017/?authSource=admin'
 export REDIS_URL='redis://localhost:6379'
+export METRICS_ENABLED='true'
+export OTEL_EXPORTER_OTLP_ENDPOINT='http://localhost:4317'
+export OTEL_SERVICE_NAME='galynx-api'
+export OTEL_SAMPLE_RATIO='1.0'
 export S3_BUCKET='galynx-attachments'
 export S3_REGION='us-east-1'
 export S3_ENDPOINT='http://localhost:9000'
@@ -94,6 +103,10 @@ Valores actuales de `error`:
 { "status": "ready" }
 ```
 
+### `GET /api/v1/metrics`
+
+Formato Prometheus text/plain para scraping de métricas HTTP del API.
+
 ## Auth
 
 ### `POST /api/v1/auth/login`
@@ -103,7 +116,8 @@ Request:
 ```json
 {
   "email": "owner@galynx.local",
-  "password": "ChangeMe123!"
+  "password": "ChangeMe123!",
+  "workspace_id": "uuid-opcional"
 }
 ```
 
@@ -151,6 +165,50 @@ Response `200`:
   "role": "owner"
 }
 ```
+
+## Workspaces
+
+### `GET /api/v1/workspaces`
+
+Lista los workspaces del usuario autenticado.
+
+### `POST /api/v1/workspaces`
+
+Crea un workspace y agrega al usuario actual como `owner`.
+
+Request:
+
+```json
+{
+  "name": "Mi Workspace"
+}
+```
+
+### `GET /api/v1/workspaces/:id/members`
+
+Requiere rol `owner` o `admin` del workspace del token.
+
+### `POST /api/v1/workspaces/:id/members`
+
+Onboarding de usuarios al workspace (nuevo o existente).
+Requiere rol `owner` o `admin`.
+
+Request:
+
+```json
+{
+  "email": "nuevo@galynx.local",
+  "name": "Nuevo Usuario",
+  "password": "ChangeMe123!",
+  "role": "member"
+}
+```
+
+Notas:
+
+- Si el email ya existe, `name/password` son opcionales y se agrega/actualiza membresía.
+- `role` soporta `admin|member`.
+- `owner` no se permite por API.
 
 ## Users
 

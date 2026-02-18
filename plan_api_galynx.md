@@ -157,13 +157,15 @@ Construir `galynx-api` como un monolito modular en Rust que cubra auth, roles, c
 - Attachments con presign/download reales S3 compatibles (MinIO mediante `S3_*` env vars).
 - Canales privados con control de acceso por membresía explícita (`channel_members`) y bypass owner/admin.
 - API para gestionar membresía de canal (`GET/POST/DELETE /channels/{id}/members`).
+- Modelo `workspaces` persistido con colección dedicada e índices base.
+- API de workspaces (`GET/POST /workspaces`, `GET/POST /workspaces/{id}/members`) para onboarding de usuarios existentes/nuevos al workspace.
+- Login multi-workspace con `workspace_id` opcional y refresh token ligado al workspace autenticado.
+- Observabilidad avanzada base: métricas HTTP Prometheus (`GET /api/v1/metrics`) + export opcional de trazas OTel vía OTLP (`OTEL_*`).
+- Bootstrap operativo formal con binario idempotente (`cargo run --bin bootstrap`) para seed de owner/workspace/canal `general`.
 - CI base agregada con checks bloqueantes (`fmt`, `clippy`, `test`, `build`).
 - Persistencia Mongo operativa (con configuración por env).
 - CLI funcional para operaciones principales.
 - Empaquetado Docker (`Dockerfile` + `docker-compose.yml`).
 
 ### Pendiente para siguiente fase
-- Completar modelo de datos objetivo (`workspaces` y onboarding de usuarios para administración de `channel_members`).
-- Agregar observabilidad avanzada (métricas y trazas OTel).
 - Extender CI con pruebas de integración/WS/e2e smoke sobre servicios reales.
-- Añadir bootstrap operativo formal (script/flujo de inicialización).

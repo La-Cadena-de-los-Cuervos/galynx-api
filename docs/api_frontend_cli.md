@@ -14,11 +14,16 @@ Este documento describe la API actual de `galynx-api` para integracion de fronte
 - `JWT_SECRET` (default: `dev-only-change-me-in-prod`)
 - `ACCESS_TTL_MINUTES` (default: `15`)
 - `REFRESH_TTL_DAYS` (default: `30`)
+- `BOOTSTRAP_WORKSPACE_NAME` (default: `Galynx`)
 - `BOOTSTRAP_EMAIL` (default: `owner@galynx.local`)
 - `BOOTSTRAP_PASSWORD` (default: `ChangeMe123!`)
 - `PERSISTENCE_BACKEND` (`memory` o `mongo`, default: `memory`)
 - `MONGO_URI` (requerido cuando `PERSISTENCE_BACKEND=mongo`)
 - `REDIS_URL` (opcional, habilita pub/sub realtime entre réplicas)
+- `METRICS_ENABLED` (default: `true`, expone `/api/v1/metrics`)
+- `OTEL_EXPORTER_OTLP_ENDPOINT` (opcional, habilita trazas OTLP gRPC)
+- `OTEL_SERVICE_NAME` (default: `galynx-api`)
+- `OTEL_SAMPLE_RATIO` (default: `1.0`)
 - `S3_BUCKET` (opcional, habilita presign real de adjuntos)
 - `S3_REGION` (default: `us-east-1`)
 - `S3_ENDPOINT` (opcional, para MinIO/S3 compatible)
@@ -31,6 +36,10 @@ Ejemplo para Mongo local:
 export PERSISTENCE_BACKEND=mongo
 export MONGO_URI='mongodb://root:password@localhost:27017/?authSource=admin'
 export REDIS_URL='redis://localhost:6379'
+export METRICS_ENABLED='true'
+export OTEL_EXPORTER_OTLP_ENDPOINT='http://localhost:4317'
+export OTEL_SERVICE_NAME='galynx-api'
+export OTEL_SAMPLE_RATIO='1.0'
 export S3_BUCKET='galynx-attachments'
 export S3_REGION='us-east-1'
 export S3_ENDPOINT='http://localhost:9000'
@@ -103,6 +112,10 @@ Respuesta `200`:
 { "status": "ready" }
 ```
 
+### `GET /api/v1/metrics`
+
+Expone métricas en formato Prometheus text/plain.
+
 ## 5) Auth endpoints
 
 ### `POST /api/v1/auth/login`
@@ -112,7 +125,8 @@ Body:
 ```json
 {
   "email": "owner@galynx.local",
-  "password": "ChangeMe123!"
+  "password": "ChangeMe123!",
+  "workspace_id": "uuid-opcional"
 }
 ```
 
@@ -190,6 +204,24 @@ Body:
 
 Requiere rol `owner` o `admin`. Respuesta `201`.
 `role` soporta `admin|member`.
+
+## 6.1) Workspaces
+
+### `GET /api/v1/workspaces`
+
+Lista workspaces del usuario autenticado.
+
+### `POST /api/v1/workspaces`
+
+Crea workspace y agrega al usuario actual como `owner`.
+
+### `GET /api/v1/workspaces/:id/members`
+
+Lista miembros del workspace (requiere `owner/admin`).
+
+### `POST /api/v1/workspaces/:id/members`
+
+Onboarding de miembro al workspace (nuevo o existente). Requiere `owner/admin`.
 
 ## 7) Channels
 
@@ -627,7 +659,12 @@ Error cuando excede: HTTP `429` o evento WS `ERROR` con `status: 429`.
 Comandos sugeridos sobre la API actual:
 
 - `galynx auth login`
+- `galynx auth login --workspace <workspace_id>`
 - `galynx auth me`
+- `galynx workspaces list`
+- `galynx workspaces create --name <name>`
+- `galynx workspaces members <workspace_id>`
+- `galynx workspaces onboard <workspace_id> --email <email> --role <admin|member> [--name <name>] [--password <password>]`
 - `galynx users list`
 - `galynx users create --email <email> --name <name> --password <password> --role <admin|member>`
 - `galynx channels list`

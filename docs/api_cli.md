@@ -13,11 +13,16 @@ Este documento define como consumir `galynx-api` desde un CLI.
 - `JWT_SECRET` (default: `dev-only-change-me-in-prod`)
 - `ACCESS_TTL_MINUTES` (default: `15`)
 - `REFRESH_TTL_DAYS` (default: `30`)
+- `BOOTSTRAP_WORKSPACE_NAME` (default: `Galynx`)
 - `BOOTSTRAP_EMAIL` (default: `owner@galynx.local`)
 - `BOOTSTRAP_PASSWORD` (default: `ChangeMe123!`)
 - `PERSISTENCE_BACKEND` (`memory` o `mongo`, default: `memory`)
 - `MONGO_URI` (requerido cuando `PERSISTENCE_BACKEND=mongo`)
 - `REDIS_URL` (opcional, habilita pub/sub realtime entre réplicas)
+- `METRICS_ENABLED` (default: `true`, expone `/api/v1/metrics`)
+- `OTEL_EXPORTER_OTLP_ENDPOINT` (opcional, habilita trazas OTLP gRPC)
+- `OTEL_SERVICE_NAME` (default: `galynx-api`)
+- `OTEL_SAMPLE_RATIO` (default: `1.0`)
 - `S3_BUCKET` (opcional, habilita presign real de adjuntos)
 - `S3_REGION` (default: `us-east-1`)
 - `S3_ENDPOINT` (opcional, para MinIO/S3 compatible)
@@ -30,6 +35,10 @@ Ejemplo para Mongo local:
 export PERSISTENCE_BACKEND=mongo
 export MONGO_URI='mongodb://root:password@localhost:27017/?authSource=admin'
 export REDIS_URL='redis://localhost:6379'
+export METRICS_ENABLED='true'
+export OTEL_EXPORTER_OTLP_ENDPOINT='http://localhost:4317'
+export OTEL_SERVICE_NAME='galynx-api'
+export OTEL_SAMPLE_RATIO='1.0'
 export S3_BUCKET='galynx-attachments'
 export S3_REGION='us-east-1'
 export S3_ENDPOINT='http://localhost:9000'
@@ -51,11 +60,13 @@ Ejemplos:
 
 ```bash
 cargo run --bin galynx -- auth login --email owner@galynx.local --password 'ChangeMe123!'
+cargo run --bin galynx -- auth login --email owner@galynx.local --password 'ChangeMe123!' --workspace <workspace_id>
 cargo run --bin galynx -- auth me
 cargo run --bin galynx -- channels list
 cargo run --bin galynx -- messages send --channel <channel_id> --body "hola"
 cargo run --bin galynx -- threads get <root_id>
 cargo run --bin galynx -- audit list --limit 20
+cargo run --bin bootstrap
 ```
 
 ## Autenticacion en CLI
@@ -81,6 +92,13 @@ cargo run --bin galynx -- audit list --limit 20
 
 - `GET /api/v1/users`
 - `POST /api/v1/users`
+
+### Workspaces
+
+- `GET /api/v1/workspaces`
+- `POST /api/v1/workspaces`
+- `GET /api/v1/workspaces/:id/members`
+- `POST /api/v1/workspaces/:id/members`
 
 ### Channels
 
@@ -117,8 +135,13 @@ cargo run --bin galynx -- audit list --limit 20
 ## Mapeo de comandos CLI sugerido
 
 - `galynx auth login`
+- `galynx auth login --workspace <workspace_id>`
 - `galynx auth me`
 - `galynx auth logout`
+- `galynx workspaces list`
+- `galynx workspaces create --name <name>`
+- `galynx workspaces members <workspace_id>`
+- `galynx workspaces onboard <workspace_id> --email <email> --role <admin|member> [--name <name>] [--password <password>]`
 - `galynx users list`
 - `galynx users create --email <email> --name <name> --password <password> --role <admin|member>`
 - `galynx channels list`
@@ -142,9 +165,14 @@ cargo run --bin galynx -- audit list --limit 20
 ## Comandos ya implementados
 
 - `auth login`
+- `auth login --workspace`
 - `auth me`
 - `auth refresh`
 - `auth logout`
+- `workspaces list`
+- `workspaces create`
+- `workspaces members`
+- `workspaces onboard`
 - `users list`
 - `users create`
 - `channels list`

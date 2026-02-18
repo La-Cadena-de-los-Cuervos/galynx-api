@@ -32,6 +32,7 @@ type WsDedupKey = (Uuid, Uuid, Uuid, String);
 pub struct Storage {
     backend: PersistenceBackend,
     mongo: Option<MongoState>,
+    workspaces: Arc<RwLock<HashMap<Uuid, WorkspaceRecordStore>>>,
     audit_entries: Arc<RwLock<Vec<AuditEntryRecord>>>,
     pending_uploads: Arc<RwLock<HashMap<Uuid, PendingUploadRecord>>>,
     attachments: Arc<RwLock<HashMap<Uuid, AttachmentRecordStore>>>,
@@ -49,6 +50,7 @@ pub struct Storage {
 
 #[derive(Clone)]
 struct MongoState {
+    workspaces: Collection<Document>,
     audit_entries: Collection<Document>,
     pending_uploads: Collection<Document>,
     attachments: Collection<Document>,
@@ -61,6 +63,14 @@ struct MongoState {
     refresh_sessions: Collection<Document>,
     ws_command_dedup: Collection<Document>,
     ws_command_once: Collection<Document>,
+}
+
+#[derive(Debug, Clone)]
+pub struct WorkspaceRecordStore {
+    pub id: Uuid,
+    pub name: String,
+    pub created_by: Uuid,
+    pub created_at: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -138,6 +148,7 @@ pub struct AuthUserRecordStore {
 #[derive(Debug, Clone)]
 pub struct RefreshSessionRecordStore {
     pub user_id: Uuid,
+    pub workspace_id: Uuid,
     pub expires_at: i64,
     pub revoked_at: Option<i64>,
     pub replaced_by_hash: Option<String>,
@@ -156,6 +167,7 @@ impl Storage {
             let client = Client::with_uri_str(uri).await?;
             let database = client.database("galynx");
             let state = MongoState {
+                workspaces: database.collection::<Document>("workspaces"),
                 audit_entries: database.collection::<Document>("audit_log"),
                 pending_uploads: database.collection::<Document>("pending_uploads"),
                 attachments: database.collection::<Document>("attachments"),
@@ -178,6 +190,7 @@ impl Storage {
         Ok(Self {
             backend,
             mongo,
+            workspaces: Arc::new(RwLock::new(HashMap::new())),
             audit_entries: Arc::new(RwLock::new(Vec::new())),
             pending_uploads: Arc::new(RwLock::new(HashMap::new())),
             attachments: Arc::new(RwLock::new(HashMap::new())),
@@ -196,6 +209,46 @@ impl Storage {
 
     pub fn backend(&self) -> PersistenceBackend {
         self.backend
+    }
+
+    pub async fn put_workspace(&self, workspace: WorkspaceRecordStore) {
+        self.workspaces
+            .write()
+            .await
+            .insert(workspace.id, workspace.clone());
+        if let Some(mongo) = &self.mongo {
+            let name_lc = workspace.name.to_ascii_lowercase();
+            let document = doc! {
+                "_id": workspace.id.to_string(),
+                "name": workspace.name,
+                "name_lc": name_lc,
+                "created_by": workspace.created_by.to_string(),
+                "created_at": workspace.created_at,
+            };
+            let _ = mongo
+                .workspaces
+                .delete_one(doc! { "_id": workspace.id.to_string() })
+                .await;
+            let _ = mongo.workspaces.insert_one(document).await;
+        }
+    }
+
+    pub async fn get_workspace(&self, workspace_id: Uuid) -> Option<WorkspaceRecordStore> {
+        if let Some(mongo) = &self.mongo {
+            let found = mongo
+                .workspaces
+                .find_one(doc! { "_id": workspace_id.to_string() })
+                .await;
+            if let Ok(Some(document)) = found {
+                return Some(WorkspaceRecordStore {
+                    id: uuid_field(&document, "_id")?,
+                    name: string_field(&document, "name").unwrap_or_default(),
+                    created_by: uuid_field(&document, "created_by")?,
+                    created_at: i64_field(&document, "created_at").unwrap_or_default(),
+                });
+            }
+        }
+        self.workspaces.read().await.get(&workspace_id).cloned()
     }
 
     pub async fn append_audit_entry(&self, entry: AuditEntryRecord) {
@@ -928,6 +981,38 @@ impl Storage {
             .collect()
     }
 
+    pub async fn list_user_memberships(&self, user_id: Uuid) -> Vec<(Uuid, String)> {
+        if let Some(mongo) = &self.mongo {
+            let mut memberships = Vec::new();
+            if let Ok(mut cursor) = mongo
+                .auth_memberships
+                .find(doc! { "user_id": user_id.to_string() })
+                .await
+            {
+                while let Ok(true) = cursor.advance().await {
+                    let Ok(document) = cursor.deserialize_current() else {
+                        continue;
+                    };
+                    let Some(workspace_id) = uuid_field(&document, "workspace_id") else {
+                        continue;
+                    };
+                    let role = string_field(&document, "role").unwrap_or_default();
+                    memberships.push((workspace_id, role));
+                }
+                return memberships;
+            }
+        }
+
+        self.auth_memberships
+            .read()
+            .await
+            .iter()
+            .filter_map(|((workspace_id, member_id), role)| {
+                (*member_id == user_id).then_some((*workspace_id, role.clone()))
+            })
+            .collect()
+    }
+
     pub async fn get_refresh_session(&self, token_hash: &str) -> Option<RefreshSessionRecordStore> {
         if let Some(mongo) = &self.mongo {
             let found = mongo
@@ -937,6 +1022,7 @@ impl Storage {
             if let Ok(Some(document)) = found {
                 return Some(RefreshSessionRecordStore {
                     user_id: uuid_field(&document, "user_id")?,
+                    workspace_id: uuid_field(&document, "workspace_id")?,
                     expires_at: i64_field(&document, "expires_at").unwrap_or_default(),
                     revoked_at: optional_i64_field(&document, "revoked_at"),
                     replaced_by_hash: string_field(&document, "replaced_by_hash"),
@@ -959,6 +1045,7 @@ impl Storage {
             let document = doc! {
                 "_id": token_hash.clone(),
                 "user_id": session.user_id.to_string(),
+                "workspace_id": session.workspace_id.to_string(),
                 "expires_at": session.expires_at,
                 "expires_at_dt": BsonDateTime::from_millis(session.expires_at * 1000),
                 "revoked_at": session.revoked_at,
@@ -1086,6 +1173,11 @@ impl Storage {
 }
 
 async fn ensure_mongo_indexes(state: &MongoState) -> Result<(), mongodb::error::Error> {
+    state
+        .workspaces
+        .create_index(IndexModel::builder().keys(doc! { "name_lc": 1 }).build())
+        .await?;
+
     state
         .auth_users
         .create_index(

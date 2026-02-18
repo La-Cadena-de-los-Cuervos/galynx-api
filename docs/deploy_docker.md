@@ -18,12 +18,19 @@ Validar health:
 
 ```bash
 curl -sS http://localhost:3000/api/v1/health
+curl -sS http://localhost:3000/api/v1/metrics
 ```
 
 Parar servicios:
 
 ```bash
 docker compose down
+```
+
+Bootstrap operativo (desde el host, contra el mismo entorno de env vars):
+
+```bash
+cargo run --bin bootstrap
 ```
 
 ## Opcion 2: Solo API en contenedor
@@ -41,6 +48,10 @@ docker run --rm -p 3000:3000 \
   -e PERSISTENCE_BACKEND=mongo \
   -e MONGO_URI='mongodb://root:password@host.docker.internal:27017/?authSource=admin' \
   -e REDIS_URL='redis://host.docker.internal:6379' \
+  -e METRICS_ENABLED='true' \
+  -e OTEL_EXPORTER_OTLP_ENDPOINT='http://host.docker.internal:4317' \
+  -e OTEL_SERVICE_NAME='galynx-api' \
+  -e OTEL_SAMPLE_RATIO='1.0' \
   -e S3_BUCKET='galynx-attachments' \
   -e S3_REGION='us-east-1' \
   -e S3_ENDPOINT='http://host.docker.internal:9000' \
@@ -57,11 +68,16 @@ docker run --rm -p 3000:3000 \
 - `JWT_SECRET`
 - `ACCESS_TTL_MINUTES` (default `15`)
 - `REFRESH_TTL_DAYS` (default `30`)
+- `BOOTSTRAP_WORKSPACE_NAME` (default `Galynx`)
 - `BOOTSTRAP_EMAIL` (default `owner@galynx.local`)
 - `BOOTSTRAP_PASSWORD` (default `ChangeMe123!`)
 - `PERSISTENCE_BACKEND` (`memory` o `mongo`)
 - `MONGO_URI` (requerida cuando `PERSISTENCE_BACKEND=mongo`)
 - `REDIS_URL` (opcional, habilita pub/sub realtime entre réplicas)
+- `METRICS_ENABLED` (default `true`, expone `/api/v1/metrics`)
+- `OTEL_EXPORTER_OTLP_ENDPOINT` (opcional, habilita trazas OTLP gRPC)
+- `OTEL_SERVICE_NAME` (default `galynx-api`)
+- `OTEL_SAMPLE_RATIO` (default `1.0`)
 - `S3_BUCKET` (opcional, habilita presign real de adjuntos)
 - `S3_REGION` (default `us-east-1`)
 - `S3_ENDPOINT` (opcional, para MinIO/S3 compatible)

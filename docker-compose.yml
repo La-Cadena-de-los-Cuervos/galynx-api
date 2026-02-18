@@ -8,11 +8,16 @@ services:
       JWT_SECRET: dev-only-change-me-in-prod
       ACCESS_TTL_MINUTES: 15
       REFRESH_TTL_DAYS: 30
+      BOOTSTRAP_WORKSPACE_NAME: Galynx
       BOOTSTRAP_EMAIL: owner@galynx.local
       BOOTSTRAP_PASSWORD: ChangeMe123!
       PERSISTENCE_BACKEND: mongo
       MONGO_URI: mongodb://root:password@mongo:27017/?authSource=admin
       REDIS_URL: redis://redis:6379
+      METRICS_ENABLED: "true"
+      OTEL_SERVICE_NAME: galynx-api
+      # OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SAMPLE_RATIO: "1.0"
       S3_BUCKET: galynx-attachments
       S3_REGION: us-east-1
       S3_ENDPOINT: http://minio:9000

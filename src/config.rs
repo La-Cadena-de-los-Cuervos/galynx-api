@@ -6,11 +6,16 @@ pub struct Config {
     pub jwt_secret: String,
     pub access_ttl_minutes: i64,
     pub refresh_ttl_days: i64,
+    pub bootstrap_workspace_name: String,
     pub bootstrap_email: String,
     pub bootstrap_password: String,
     pub persistence_backend: PersistenceBackend,
     pub mongo_uri: Option<String>,
     pub redis_url: Option<String>,
+    pub metrics_enabled: bool,
+    pub otel_exporter_otlp_endpoint: Option<String>,
+    pub otel_service_name: String,
+    pub otel_sample_ratio: f64,
     pub s3_bucket: Option<String>,
     pub s3_region: String,
     pub s3_endpoint: Option<String>,
@@ -33,6 +38,8 @@ impl Config {
             refresh_ttl_days: read_env("REFRESH_TTL_DAYS")
                 .and_then(|value| value.parse::<i64>().ok())
                 .unwrap_or(30),
+            bootstrap_workspace_name: read_env("BOOTSTRAP_WORKSPACE_NAME")
+                .unwrap_or_else(|| "Galynx".to_string()),
             bootstrap_email: read_env("BOOTSTRAP_EMAIL")
                 .unwrap_or_else(|| "owner@galynx.local".to_string()),
             bootstrap_password: read_env("BOOTSTRAP_PASSWORD")
@@ -43,6 +50,16 @@ impl Config {
                 .unwrap_or(PersistenceBackend::Memory),
             mongo_uri: read_env("MONGO_URI"),
             redis_url: read_env("REDIS_URL"),
+            metrics_enabled: read_env("METRICS_ENABLED")
+                .map(|value| parse_bool(&value))
+                .unwrap_or(true),
+            otel_exporter_otlp_endpoint: read_env("OTEL_EXPORTER_OTLP_ENDPOINT"),
+            otel_service_name: read_env("OTEL_SERVICE_NAME")
+                .unwrap_or_else(|| "galynx-api".to_string()),
+            otel_sample_ratio: read_env("OTEL_SAMPLE_RATIO")
+                .and_then(|value| value.parse::<f64>().ok())
+                .map(|value| value.clamp(0.0, 1.0))
+                .unwrap_or(1.0),
             s3_bucket: read_env("S3_BUCKET"),
             s3_region: read_env("S3_REGION").unwrap_or_else(|| "us-east-1".to_string()),
             s3_endpoint: read_env("S3_ENDPOINT"),

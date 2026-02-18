@@ -26,6 +26,10 @@ enum Command {
         #[command(subcommand)]
         command: AuthCommands,
     },
+    Workspaces {
+        #[command(subcommand)]
+        command: WorkspaceCommands,
+    },
     Channels {
         #[command(subcommand)]
         command: ChannelCommands,
@@ -66,6 +70,40 @@ struct LoginArgs {
     email: String,
     #[arg(long)]
     password: String,
+    #[arg(long)]
+    workspace: Option<String>,
+}
+
+#[derive(Subcommand, Debug)]
+enum WorkspaceCommands {
+    List,
+    Create(CreateWorkspaceArgs),
+    Members(WorkspaceMembersArgs),
+    Onboard(WorkspaceOnboardArgs),
+}
+
+#[derive(Args, Debug)]
+struct CreateWorkspaceArgs {
+    #[arg(long)]
+    name: String,
+}
+
+#[derive(Args, Debug)]
+struct WorkspaceMembersArgs {
+    workspace_id: String,
+}
+
+#[derive(Args, Debug)]
+struct WorkspaceOnboardArgs {
+    workspace_id: String,
+    #[arg(long)]
+    email: String,
+    #[arg(long)]
+    role: String,
+    #[arg(long)]
+    name: Option<String>,
+    #[arg(long)]
+    password: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -293,6 +331,7 @@ async fn run() -> CliResult<()> {
 
     match cli.command {
         Command::Auth { command } => run_auth(command, cli.base_url, &client).await,
+        Command::Workspaces { command } => run_workspaces(command, cli.base_url, &client).await,
         Command::Channels { command } => run_channels(command, cli.base_url, &client).await,
         Command::Messages { command } => run_messages(command, cli.base_url, &client).await,
         Command::Threads { command } => run_threads(command, cli.base_url, &client).await,
@@ -310,6 +349,12 @@ async fn run_auth(
     match command {
         AuthCommands::Login(args) => {
             let base_url = resolve_base_url(base_url_flag.as_deref(), None);
+            let workspace_id = args
+                .workspace
+                .as_deref()
+                .map(|value| value.parse::<uuid::Uuid>())
+                .transpose()
+                .map_err(|_| cli_error("invalid --workspace uuid".to_string()))?;
             let response = send_json(
                 client,
                 Method::POST,
@@ -318,6 +363,7 @@ async fn run_auth(
                 Some(json!({
                     "email": args.email,
                     "password": args.password,
+                    "workspace_id": workspace_id,
                 })),
                 None,
                 None,
@@ -376,6 +422,57 @@ async fn run_auth(
             Ok(())
         }
     }
+}
+
+async fn run_workspaces(
+    command: WorkspaceCommands,
+    base_url_flag: Option<String>,
+    client: &Client,
+) -> CliResult<()> {
+    let mut session = load_session()?;
+    session.base_url = resolve_base_url(base_url_flag.as_deref(), Some(&session.base_url));
+
+    let response = match command {
+        WorkspaceCommands::List => {
+            send_authed_json(client, Method::GET, &mut session, "/workspaces", None, None).await?
+        }
+        WorkspaceCommands::Create(args) => {
+            send_authed_json(
+                client,
+                Method::POST,
+                &mut session,
+                "/workspaces",
+                Some(json!({ "name": args.name })),
+                None,
+            )
+            .await?
+        }
+        WorkspaceCommands::Members(args) => {
+            let path = format!("/workspaces/{}/members", args.workspace_id);
+            send_authed_json(client, Method::GET, &mut session, &path, None, None).await?
+        }
+        WorkspaceCommands::Onboard(args) => {
+            let role = normalize_user_role(&args.role)?;
+            let path = format!("/workspaces/{}/members", args.workspace_id);
+            send_authed_json(
+                client,
+                Method::POST,
+                &mut session,
+                &path,
+                Some(json!({
+                    "email": args.email,
+                    "name": args.name,
+                    "password": args.password,
+                    "role": role,
+                })),
+                None,
+            )
+            .await?
+        }
+    };
+
+    save_session(&session)?;
+    print_or_ok(response).await
 }
 
 async fn run_channels(

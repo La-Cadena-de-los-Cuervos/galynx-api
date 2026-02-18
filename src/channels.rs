@@ -615,12 +615,6 @@ impl ChannelService {
     }
 
     async fn ensure_bootstrap_seed(&self) {
-        if matches!(
-            self.storage.backend(),
-            crate::storage::PersistenceBackend::Mongo
-        ) {
-            return;
-        }
         let has_bootstrap_channel = !self
             .storage
             .list_channels(self.bootstrap_workspace_id)
