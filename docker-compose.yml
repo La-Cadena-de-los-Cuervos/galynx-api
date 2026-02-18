@@ -20,9 +20,9 @@ services:
       OTEL_SAMPLE_RATIO: "1.0"
       S3_BUCKET: galynx-attachments
       S3_REGION: us-east-1
-      S3_ENDPOINT: http://minio:9000
-      S3_ACCESS_KEY_ID: minioadmin
-      S3_SECRET_ACCESS_KEY: minioadmin
+      S3_ENDPOINT: http://rustfs:9000
+      S3_ACCESS_KEY_ID: rustfsadmin
+      S3_SECRET_ACCESS_KEY: rustfsadmin
       S3_FORCE_PATH_STYLE: "true"
     ports:
       - "3000:3000"
@@ -31,7 +31,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-      minio:
+      rustfs:
         condition: service_started
     restart: unless-stopped
 
@@ -60,27 +60,28 @@ services:
       - redisdata:/data
     restart: unless-stopped
 
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
+  rustfs:
+    image: rustfs/rustfs:latest
+    command: /data
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      RUSTFS_ACCESS_KEY: rustfsadmin
+      RUSTFS_SECRET_KEY: rustfsadmin
+      RUSTFS_CONSOLE_ENABLE: "true"
     ports:
       - "9000:9000"
       - "9001:9001"
     volumes:
-      - miniodata:/data
+      - rustfsdata:/data
     restart: unless-stopped
 
-  minio-init:
+  rustfs-init:
     image: minio/mc:latest
     depends_on:
-      minio:
+      rustfs:
         condition: service_started
     entrypoint: >
       /bin/sh -c "
-      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc alias set local http://rustfs:9000 rustfsadmin rustfsadmin &&
       mc mb --ignore-existing local/galynx-attachments &&
       mc anonymous set none local/galynx-attachments
       "
@@ -89,4 +90,4 @@ services:
 volumes:
   mongodata:
   redisdata:
-  miniodata:
+  rustfsdata:

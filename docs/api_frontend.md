@@ -26,9 +26,9 @@ Este documento esta enfocado en integracion frontend (web/mobile) con `galynx-ap
 - `OTEL_SAMPLE_RATIO` (default: `1.0`)
 - `S3_BUCKET` (opcional, habilita presign real de adjuntos)
 - `S3_REGION` (default: `us-east-1`)
-- `S3_ENDPOINT` (opcional, para MinIO/S3 compatible)
+- `S3_ENDPOINT` (opcional, para RustFS/S3 compatible)
 - `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` (opcionales)
-- `S3_FORCE_PATH_STYLE` (default: `true`, recomendado con MinIO)
+- `S3_FORCE_PATH_STYLE` (default: `true`, recomendado con RustFS)
 
 Ejemplo para Mongo local:
 
@@ -43,8 +43,8 @@ export OTEL_SAMPLE_RATIO='1.0'
 export S3_BUCKET='galynx-attachments'
 export S3_REGION='us-east-1'
 export S3_ENDPOINT='http://localhost:9000'
-export S3_ACCESS_KEY_ID='minioadmin'
-export S3_SECRET_ACCESS_KEY='minioadmin'
+export S3_ACCESS_KEY_ID='rustfsadmin'
+export S3_SECRET_ACCESS_KEY='rustfsadmin'
 export S3_FORCE_PATH_STYLE='true'
 cargo run
 ```

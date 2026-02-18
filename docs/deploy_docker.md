@@ -1,6 +1,6 @@
 # Despliegue en Docker
 
-## Opcion 1: Docker Compose (API + Mongo + Redis + MinIO)
+## Opcion 1: Docker Compose (API + Mongo + Redis + RustFS)
 
 Desde la raiz del repo:
 
@@ -41,7 +41,7 @@ Build:
 docker build -t galynx-api:local .
 ```
 
-Run (con Mongo/Redis/MinIO externos):
+Run (con Mongo/Redis/RustFS externos):
 
 ```bash
 docker run --rm -p 3000:3000 \
@@ -55,8 +55,8 @@ docker run --rm -p 3000:3000 \
   -e S3_BUCKET='galynx-attachments' \
   -e S3_REGION='us-east-1' \
   -e S3_ENDPOINT='http://host.docker.internal:9000' \
-  -e S3_ACCESS_KEY_ID='minioadmin' \
-  -e S3_SECRET_ACCESS_KEY='minioadmin' \
+  -e S3_ACCESS_KEY_ID='rustfsadmin' \
+  -e S3_SECRET_ACCESS_KEY='rustfsadmin' \
   -e S3_FORCE_PATH_STYLE='true' \
   -e JWT_SECRET='dev-only-change-me-in-prod' \
   galynx-api:local
@@ -80,6 +80,6 @@ docker run --rm -p 3000:3000 \
 - `OTEL_SAMPLE_RATIO` (default `1.0`)
 - `S3_BUCKET` (opcional, habilita presign real de adjuntos)
 - `S3_REGION` (default `us-east-1`)
-- `S3_ENDPOINT` (opcional, para MinIO/S3 compatible)
+- `S3_ENDPOINT` (opcional, para RustFS/S3 compatible)
 - `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` (opcionales)
-- `S3_FORCE_PATH_STYLE` (default `true`, recomendado con MinIO)
+- `S3_FORCE_PATH_STYLE` (default `true`, recomendado con RustFS)
