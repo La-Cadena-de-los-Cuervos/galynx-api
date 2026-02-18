@@ -54,6 +54,12 @@ fn pick_open_port() -> u16 {
         .port()
 }
 
+fn api_binary_path() -> String {
+    std::env::var("CARGO_BIN_EXE_galynx-api")
+        .or_else(|_| std::env::var("CARGO_BIN_EXE_galynx_api"))
+        .unwrap_or_else(|_| "target/debug/galynx-api".to_string())
+}
+
 async fn start_server(tag: &str) -> TestServer {
     let port = pick_open_port();
     let base_url = format!("http://127.0.0.1:{port}");
@@ -70,8 +76,7 @@ async fn start_server(tag: &str) -> TestServer {
     let redis_url =
         std::env::var("TEST_REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
 
-    let binary = std::env::var("CARGO_BIN_EXE_galynx-api")
-        .expect("cargo did not provide CARGO_BIN_EXE_galynx-api");
+    let binary = api_binary_path();
 
     let child = Command::new(binary)
         .env("PORT", port.to_string())

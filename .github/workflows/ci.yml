@@ -67,6 +67,12 @@ jobs:
             sleep 1
           done
           for i in {1..60}; do
+            if mongosh --quiet "mongodb://root:password@127.0.0.1:27017/admin?authSource=admin" --eval "db.runCommand({ ping: 1 }).ok" | grep 1 >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+          for i in {1..60}; do
             (echo > /dev/tcp/127.0.0.1/6379) >/dev/null 2>&1 && break
             sleep 1
           done
@@ -75,4 +81,5 @@ jobs:
         env:
           TEST_MONGO_URI: mongodb://root:password@127.0.0.1:27017/?authSource=admin
           TEST_REDIS_URL: redis://127.0.0.1:6379
-        run: cargo test --test ci_integration -- --ignored --nocapture
+          RUST_TEST_THREADS: 1
+        run: cargo test --test ci_integration -- --ignored --nocapture --test-threads=1
