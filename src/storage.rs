@@ -896,6 +896,38 @@ impl Storage {
             })
     }
 
+    pub async fn list_workspace_memberships(&self, workspace_id: Uuid) -> Vec<(Uuid, String)> {
+        if let Some(mongo) = &self.mongo {
+            let mut memberships = Vec::new();
+            if let Ok(mut cursor) = mongo
+                .auth_memberships
+                .find(doc! { "workspace_id": workspace_id.to_string() })
+                .await
+            {
+                while let Ok(true) = cursor.advance().await {
+                    let Ok(document) = cursor.deserialize_current() else {
+                        continue;
+                    };
+                    let Some(user_id) = uuid_field(&document, "user_id") else {
+                        continue;
+                    };
+                    let role = string_field(&document, "role").unwrap_or_default();
+                    memberships.push((user_id, role));
+                }
+                return memberships;
+            }
+        }
+
+        self.auth_memberships
+            .read()
+            .await
+            .iter()
+            .filter_map(|((stored_workspace_id, user_id), role)| {
+                (*stored_workspace_id == workspace_id).then_some((*user_id, role.clone()))
+            })
+            .collect()
+    }
+
     pub async fn get_refresh_session(&self, token_hash: &str) -> Option<RefreshSessionRecordStore> {
         if let Some(mongo) = &self.mongo {
             let found = mongo

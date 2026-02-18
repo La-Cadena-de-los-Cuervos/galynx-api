@@ -10,6 +10,7 @@ mod reactions;
 mod realtime;
 mod storage;
 mod threads;
+mod users;
 
 use std::net::SocketAddr;
 

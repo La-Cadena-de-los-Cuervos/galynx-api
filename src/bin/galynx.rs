@@ -46,6 +46,10 @@ enum Command {
         #[command(subcommand)]
         command: AuditCommands,
     },
+    Users {
+        #[command(subcommand)]
+        command: UserCommands,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -69,6 +73,9 @@ enum ChannelCommands {
     List,
     Create(CreateChannelArgs),
     Delete(DeleteChannelArgs),
+    Members(ChannelMembersArgs),
+    MemberAdd(ChannelMemberAddArgs),
+    MemberRemove(ChannelMemberRemoveArgs),
 }
 
 #[derive(Args, Debug)]
@@ -82,6 +89,25 @@ struct CreateChannelArgs {
 #[derive(Args, Debug)]
 struct DeleteChannelArgs {
     channel_id: String,
+}
+
+#[derive(Args, Debug)]
+struct ChannelMembersArgs {
+    channel_id: String,
+}
+
+#[derive(Args, Debug)]
+struct ChannelMemberAddArgs {
+    channel_id: String,
+    #[arg(long)]
+    user: String,
+}
+
+#[derive(Args, Debug)]
+struct ChannelMemberRemoveArgs {
+    channel_id: String,
+    #[arg(long)]
+    user: String,
 }
 
 #[derive(Subcommand, Debug)]
@@ -197,6 +223,24 @@ struct AuditListArgs {
     limit: Option<usize>,
 }
 
+#[derive(Subcommand, Debug)]
+enum UserCommands {
+    List,
+    Create(CreateUserArgs),
+}
+
+#[derive(Args, Debug)]
+struct CreateUserArgs {
+    #[arg(long)]
+    email: String,
+    #[arg(long)]
+    name: String,
+    #[arg(long)]
+    password: String,
+    #[arg(long)]
+    role: String,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct StoredSession {
     base_url: String,
@@ -254,6 +298,7 @@ async fn run() -> CliResult<()> {
         Command::Threads { command } => run_threads(command, cli.base_url, &client).await,
         Command::Attachments { command } => run_attachments(command, cli.base_url, &client).await,
         Command::Audit { command } => run_audit(command, cli.base_url, &client).await,
+        Command::Users { command } => run_users(command, cli.base_url, &client).await,
     }
 }
 
@@ -361,6 +406,26 @@ async fn run_channels(
         }
         ChannelCommands::Delete(args) => {
             let path = format!("/channels/{}", args.channel_id);
+            send_authed_json(client, Method::DELETE, &mut session, &path, None, None).await?
+        }
+        ChannelCommands::Members(args) => {
+            let path = format!("/channels/{}/members", args.channel_id);
+            send_authed_json(client, Method::GET, &mut session, &path, None, None).await?
+        }
+        ChannelCommands::MemberAdd(args) => {
+            let path = format!("/channels/{}/members", args.channel_id);
+            send_authed_json(
+                client,
+                Method::POST,
+                &mut session,
+                &path,
+                Some(json!({ "user_id": args.user })),
+                None,
+            )
+            .await?
+        }
+        ChannelCommands::MemberRemove(args) => {
+            let path = format!("/channels/{}/members/{}", args.channel_id, args.user);
             send_authed_json(client, Method::DELETE, &mut session, &path, None, None).await?
         }
     };
@@ -582,6 +647,52 @@ async fn run_audit(
 
     save_session(&session)?;
     print_or_ok(response).await
+}
+
+async fn run_users(
+    command: UserCommands,
+    base_url_flag: Option<String>,
+    client: &Client,
+) -> CliResult<()> {
+    let mut session = load_session()?;
+    session.base_url = resolve_base_url(base_url_flag.as_deref(), Some(&session.base_url));
+
+    let response = match command {
+        UserCommands::List => {
+            send_authed_json(client, Method::GET, &mut session, "/users", None, None).await?
+        }
+        UserCommands::Create(args) => {
+            let role = normalize_user_role(&args.role)?;
+            send_authed_json(
+                client,
+                Method::POST,
+                &mut session,
+                "/users",
+                Some(json!({
+                    "email": args.email,
+                    "name": args.name,
+                    "password": args.password,
+                    "role": role,
+                })),
+                None,
+            )
+            .await?
+        }
+    };
+
+    save_session(&session)?;
+    print_or_ok(response).await
+}
+
+fn normalize_user_role(value: &str) -> CliResult<&'static str> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "admin" => Ok("admin"),
+        "member" => Ok("member"),
+        "owner" => Ok("owner"),
+        _ => Err(Box::new(cli_error(
+            "invalid role: expected owner|admin|member".to_string(),
+        ))),
+    }
 }
 
 fn cursor_limit_query(cursor: Option<String>, limit: Option<usize>) -> Vec<(String, String)> {

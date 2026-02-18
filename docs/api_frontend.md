@@ -152,6 +152,48 @@ Response `200`:
 }
 ```
 
+## Users
+
+### `GET /api/v1/users`
+
+Requiere rol `owner` o `admin`.
+
+Response `200`:
+
+```json
+[
+  {
+    "id": "uuid",
+    "email": "member@galynx.local",
+    "name": "Member User",
+    "workspace_id": "uuid",
+    "role": "member"
+  }
+]
+```
+
+### `POST /api/v1/users`
+
+Requiere rol `owner` o `admin`.
+
+Request:
+
+```json
+{
+  "email": "member@galynx.local",
+  "name": "Member User",
+  "password": "ChangeMe123!",
+  "role": "member"
+}
+```
+
+Response: `201`.
+
+Notas:
+
+- `role` soporta `admin` y `member`.
+- Alta de `owner` por API no está permitida.
+
 ## Channels
 
 ### `GET /api/v1/channels`

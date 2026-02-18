@@ -169,7 +169,29 @@ Respuesta `200`:
 }
 ```
 
-## 6) Channels
+## 6) Users
+
+### `GET /api/v1/users`
+
+Requiere rol `owner` o `admin`.
+
+### `POST /api/v1/users`
+
+Body:
+
+```json
+{
+  "email": "member@galynx.local",
+  "name": "Member User",
+  "password": "ChangeMe123!",
+  "role": "member"
+}
+```
+
+Requiere rol `owner` o `admin`. Respuesta `201`.
+`role` soporta `admin|member`.
+
+## 7) Channels
 
 ## Roles
 
@@ -235,7 +257,7 @@ Requiere rol `owner` o `admin`. Respuesta `204`.
 
 Requiere rol `owner` o `admin`. Respuesta `204`.
 
-## 7) Messages
+## 8) Messages
 
 ### `GET /api/v1/channels/:id/messages?limit=50&cursor=<cursor>`
 
@@ -299,7 +321,7 @@ Restriccion:
 
 - Puede borrar: autor del mensaje, `owner` o `admin`.
 
-## 8) Threads
+## 9) Threads
 
 ### `GET /api/v1/threads/:root_id`
 
@@ -332,7 +354,7 @@ Body:
 
 Respuesta `201`: `MessageResponse` con `thread_root_id` apuntando al root.
 
-## 9) Attachments
+## 10) Attachments
 
 ## Limites y TTL
 
@@ -416,7 +438,7 @@ Respuesta `200`:
 }
 ```
 
-## 10) Audit
+## 11) Audit
 
 ### `GET /api/v1/audit?limit=50&cursor=<cursor>`
 
@@ -444,7 +466,7 @@ Respuesta `200`:
 }
 ```
 
-## 11) WebSocket realtime
+## 12) WebSocket realtime
 
 ### Conexion
 
@@ -581,7 +603,7 @@ La API envia evento `ERROR`:
 - `THREAD_UPDATED`
 - `REACTION_UPDATED`
 
-## 12) Paginacion (messages, thread replies, audit)
+## 13) Paginacion (messages, thread replies, audit)
 
 Convencion de cursor:
 
@@ -592,7 +614,7 @@ Regla:
 - Si `next_cursor` es `null`, no hay mas pagina.
 - Para siguiente pagina, enviar `cursor=next_cursor`.
 
-## 13) Rate limits actuales (en memoria)
+## 14) Rate limits actuales (en memoria)
 
 - Auth (`/auth/login`, `/auth/refresh`, `/auth/logout`): `30 req/min` por combinacion IP/email.
 - WebSocket connect (`/ws`): `12 conexiones/min` por IP+user.
@@ -600,12 +622,14 @@ Regla:
 
 Error cuando excede: HTTP `429` o evento WS `ERROR` con `status: 429`.
 
-## 14) Mapeo sugerido para CLI
+## 15) Mapeo sugerido para CLI
 
 Comandos sugeridos sobre la API actual:
 
 - `galynx auth login`
 - `galynx auth me`
+- `galynx users list`
+- `galynx users create --email <email> --name <name> --password <password> --role <admin|member>`
 - `galynx channels list`
 - `galynx channels create --name <name> [--private]`
 - `galynx channels delete <channel_id>`
@@ -621,7 +645,7 @@ Comandos sugeridos sobre la API actual:
 - `galynx attachments get <attachment_id>`
 - `galynx audit list [--cursor ...] [--limit ...]`
 
-## 15) Notas para frontend
+## 16) Notas para frontend
 
 - Implementar interceptor de `401` + refresh atomico (evitar multiples refresh paralelos).
 - Tratar `429` con backoff exponencial corto.

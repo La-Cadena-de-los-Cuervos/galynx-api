@@ -7,7 +7,7 @@ use utoipa::{OpenApi, ToSchema};
 
 use crate::{
     attachments, audit, auth, channels, config::Config, rate_limit, reactions, realtime, storage,
-    threads,
+    threads, users,
 };
 
 #[derive(Clone)]
@@ -21,6 +21,7 @@ pub struct AppState {
     pub rate_limit: Arc<rate_limit::RateLimitService>,
     pub reactions: Arc<reactions::ReactionService>,
     pub realtime: Arc<realtime::RealtimeHub>,
+    pub users: Arc<users::UserService>,
 }
 
 pub async fn build_state(config: Config) -> AppState {
@@ -44,6 +45,7 @@ pub async fn build_state(config: Config) -> AppState {
     let rate_limit_service = rate_limit::RateLimitService::new();
     let reactions_service = reactions::ReactionService::new(storage.clone());
     let realtime_hub = realtime::RealtimeHub::new(config.redis_url.as_deref());
+    let users_service = users::UserService::new(storage.clone());
     AppState {
         config: Arc::new(config),
         storage,
@@ -54,6 +56,7 @@ pub async fn build_state(config: Config) -> AppState {
         rate_limit: Arc::new(rate_limit_service),
         reactions: Arc::new(reactions_service),
         realtime: Arc::new(realtime_hub),
+        users: Arc::new(users_service),
     }
 }
 
@@ -68,6 +71,7 @@ pub fn router(state: AppState) -> Router {
         .merge(threads::router())
         .merge(audit::router())
         .merge(realtime::router())
+        .merge(users::router())
         .with_state(state)
         .layer(TraceLayer::new_for_http())
 }
@@ -129,7 +133,9 @@ async fn openapi_spec() -> Json<utoipa::openapi::OpenApi> {
         crate::attachments::commit,
         crate::attachments::get_attachment,
         crate::audit::list_audit,
-        crate::realtime::ws_upgrade
+        crate::realtime::ws_upgrade,
+        crate::users::list_users,
+        crate::users::create_user
     ),
     components(
         schemas(
@@ -158,6 +164,8 @@ async fn openapi_spec() -> Json<utoipa::openapi::OpenApi> {
             crate::audit::AuditListResponse,
             crate::reactions::ReactionUpdateResponse,
             crate::realtime::WsEventEnvelope,
+            crate::users::CreateUserRequest,
+            crate::users::UserResponse,
             crate::errors::ErrorResponse
         )
     ),

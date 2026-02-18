@@ -77,6 +77,11 @@ cargo run --bin galynx -- audit list --limit 20
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/me`
 
+### Users
+
+- `GET /api/v1/users`
+- `POST /api/v1/users`
+
 ### Channels
 
 - `GET /api/v1/channels`
@@ -114,6 +119,8 @@ cargo run --bin galynx -- audit list --limit 20
 - `galynx auth login`
 - `galynx auth me`
 - `galynx auth logout`
+- `galynx users list`
+- `galynx users create --email <email> --name <name> --password <password> --role <admin|member>`
 - `galynx channels list`
 - `galynx channels create --name <name> [--private]`
 - `galynx channels delete <channel_id>`
@@ -138,9 +145,14 @@ cargo run --bin galynx -- audit list --limit 20
 - `auth me`
 - `auth refresh`
 - `auth logout`
+- `users list`
+- `users create`
 - `channels list`
 - `channels create`
 - `channels delete`
+- `channels members`
+- `channels member-add`
+- `channels member-remove`
 - `messages list`
 - `messages send`
 - `messages edit`
