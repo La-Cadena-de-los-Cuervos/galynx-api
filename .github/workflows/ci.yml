@@ -33,3 +33,46 @@ jobs:
 
       - name: Build release
         run: cargo build --release
+
+  integration:
+    runs-on: ubuntu-latest
+    needs: rust
+    services:
+      mongo:
+        image: mongo:8.0
+        env:
+          MONGO_INITDB_ROOT_USERNAME: root
+          MONGO_INITDB_ROOT_PASSWORD: password
+        ports:
+          - 27017:27017
+      redis:
+        image: redis:7.4
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Wait for Mongo and Redis
+        run: |
+          for i in {1..60}; do
+            (echo > /dev/tcp/127.0.0.1/27017) >/dev/null 2>&1 && break
+            sleep 1
+          done
+          for i in {1..60}; do
+            (echo > /dev/tcp/127.0.0.1/6379) >/dev/null 2>&1 && break
+            sleep 1
+          done
+
+      - name: Run integration + ws + e2e smoke tests
+        env:
+          TEST_MONGO_URI: mongodb://root:password@127.0.0.1:27017/?authSource=admin
+          TEST_REDIS_URL: redis://127.0.0.1:6379
+        run: cargo test --test ci_integration -- --ignored --nocapture

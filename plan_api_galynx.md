@@ -163,9 +163,9 @@ Construir `galynx-api` como un monolito modular en Rust que cubra auth, roles, c
 - Observabilidad avanzada base: métricas HTTP Prometheus (`GET /api/v1/metrics`) + export opcional de trazas OTel vía OTLP (`OTEL_*`).
 - Bootstrap operativo formal con binario idempotente (`cargo run --bin bootstrap`) para seed de owner/workspace/canal `general`.
 - CI base agregada con checks bloqueantes (`fmt`, `clippy`, `test`, `build`).
+- CI extendida con pruebas de integración HTTP, WebSocket y smoke e2e en job dedicado con Mongo/Redis.
 - Persistencia Mongo operativa (con configuración por env).
 - CLI funcional para operaciones principales.
 - Empaquetado Docker (`Dockerfile` + `docker-compose.yml`).
 
 ### Pendiente para siguiente fase
-- Extender CI con pruebas de integración/WS/e2e smoke sobre servicios reales.
