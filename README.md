@@ -46,6 +46,7 @@ Estado actual:
 - `BOOTSTRAP_PASSWORD` (default: `ChangeMe123!`)
 - `PERSISTENCE_BACKEND` (`memory` o `mongo`, default: `memory`)
 - `MONGO_URI` (requerido cuando `PERSISTENCE_BACKEND=mongo`)
+- `REDIS_URL` (opcional, habilita pub/sub realtime entre réplicas)
 
 ## Ejecutar en local (sin Docker)
 
@@ -60,6 +61,7 @@ cargo run
 ```bash
 export PERSISTENCE_BACKEND=mongo
 export MONGO_URI='mongodb://root:password@localhost:27017/?authSource=admin'
+export REDIS_URL='redis://localhost:6379'
 cargo run
 ```
 
@@ -129,4 +131,3 @@ curl -sS http://localhost:3000/api/v1/openapi.json | jq '.'
 - `cargo run` ejecuta por defecto el binario del API (`galynx-api`).
 - Para ejecutar el CLI usa `cargo run --bin galynx -- ...`.
 - Si el CLI devuelve datos inesperados, valida que el API esté en `PERSISTENCE_BACKEND=mongo` y vuelve a hacer login para regenerar sesión.
-

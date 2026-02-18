@@ -43,7 +43,7 @@ pub async fn build_state(config: Config) -> AppState {
     let attachments_service = attachments::AttachmentService::new(storage.clone());
     let rate_limit_service = rate_limit::RateLimitService::new();
     let reactions_service = reactions::ReactionService::new(storage.clone());
-    let realtime_hub = realtime::RealtimeHub::new();
+    let realtime_hub = realtime::RealtimeHub::new(config.redis_url.as_deref());
     AppState {
         config: Arc::new(config),
         storage,

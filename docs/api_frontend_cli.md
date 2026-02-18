@@ -18,12 +18,14 @@ Este documento describe la API actual de `galynx-api` para integracion de fronte
 - `BOOTSTRAP_PASSWORD` (default: `ChangeMe123!`)
 - `PERSISTENCE_BACKEND` (`memory` o `mongo`, default: `memory`)
 - `MONGO_URI` (requerido cuando `PERSISTENCE_BACKEND=mongo`)
+- `REDIS_URL` (opcional, habilita pub/sub realtime entre réplicas)
 
 Ejemplo para Mongo local:
 
 ```bash
 export PERSISTENCE_BACKEND=mongo
 export MONGO_URI='mongodb://root:password@localhost:27017/?authSource=admin'
+export REDIS_URL='redis://localhost:6379'
 cargo run
 ```
 

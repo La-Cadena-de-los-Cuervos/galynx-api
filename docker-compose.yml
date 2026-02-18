@@ -12,6 +12,7 @@ services:
       BOOTSTRAP_PASSWORD: ChangeMe123!
       PERSISTENCE_BACKEND: mongo
       MONGO_URI: mongodb://root:password@mongo:27017/?authSource=admin
+      REDIS_URL: redis://redis:6379
     ports:
       - "3000:3000"
     depends_on:

@@ -11,10 +11,14 @@ use axum::{
     routing::get,
 };
 use chrono::Utc;
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use tokio::sync::{RwLock, broadcast};
-use tracing::warn;
+use tokio::{
+    sync::{RwLock, broadcast, mpsc},
+    time::{Duration, sleep},
+};
+use tracing::{info, warn};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -26,9 +30,13 @@ use crate::{
     rate_limit::client_ip_from_headers,
 };
 
+const REDIS_WS_CHANNEL: &str = "galynx:ws:events";
+
 #[derive(Clone)]
 pub struct RealtimeHub {
     workspaces: Arc<RwLock<HashMap<Uuid, broadcast::Sender<WsEventEnvelope>>>>,
+    instance_id: String,
+    redis_outbox: Option<mpsc::UnboundedSender<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -39,6 +47,12 @@ pub struct WsEventEnvelope {
     pub correlation_id: Option<String>,
     pub server_ts: i64,
     pub payload: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RedisEventEnvelope {
+    source_instance_id: String,
+    event: WsEventEnvelope,
 }
 
 #[derive(Debug, Deserialize)]
@@ -90,9 +104,30 @@ pub fn router() -> Router<AppState> {
 }
 
 impl RealtimeHub {
-    pub fn new() -> Self {
+    pub fn new(redis_url: Option<&str>) -> Self {
+        let workspaces = Arc::new(RwLock::new(HashMap::new()));
+        let instance_id = Uuid::new_v4().to_string();
+
+        let redis_outbox = redis_url
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| {
+                let (tx, rx) = mpsc::unbounded_channel::<String>();
+                spawn_redis_publisher(value.to_string(), rx);
+                spawn_redis_subscriber(value.to_string(), workspaces.clone(), instance_id.clone());
+                tx
+            });
+
+        if redis_outbox.is_some() {
+            info!("realtime redis bridge enabled");
+        } else {
+            info!("realtime redis bridge disabled (REDIS_URL not set)");
+        }
+
         Self {
-            workspaces: Arc::new(RwLock::new(HashMap::new())),
+            workspaces,
+            instance_id,
+            redis_outbox,
         }
     }
 
@@ -108,15 +143,136 @@ impl RealtimeHub {
     }
 
     pub async fn emit(&self, workspace_id: Uuid, event: WsEventEnvelope) {
-        let sender = {
-            let mut workspaces = self.workspaces.write().await;
-            workspaces
-                .entry(workspace_id)
-                .or_insert_with(|| broadcast::channel::<WsEventEnvelope>(1024).0)
-                .clone()
+        self.emit_local(workspace_id, event.clone()).await;
+
+        let Some(redis_outbox) = &self.redis_outbox else {
+            return;
         };
-        let _ = sender.send(event);
+
+        let payload = RedisEventEnvelope {
+            source_instance_id: self.instance_id.clone(),
+            event,
+        };
+        match serde_json::to_string(&payload) {
+            Ok(serialized) => {
+                let _ = redis_outbox.send(serialized);
+            }
+            Err(error) => {
+                warn!("failed to serialize realtime redis payload: {}", error);
+            }
+        }
     }
+
+    async fn emit_local(&self, workspace_id: Uuid, event: WsEventEnvelope) {
+        emit_workspace_event(&self.workspaces, workspace_id, event).await;
+    }
+}
+
+fn spawn_redis_publisher(redis_url: String, mut rx: mpsc::UnboundedReceiver<String>) {
+    tokio::spawn(async move {
+        while let Some(payload) = rx.recv().await {
+            loop {
+                match publish_redis_event(&redis_url, &payload).await {
+                    Ok(()) => break,
+                    Err(error) => {
+                        warn!("redis publish failed, retrying: {}", error);
+                        sleep(Duration::from_millis(400)).await;
+                    }
+                }
+            }
+        }
+    });
+}
+
+async fn publish_redis_event(redis_url: &str, payload: &str) -> Result<(), String> {
+    let client =
+        redis::Client::open(redis_url).map_err(|error| format!("invalid redis url: {error}"))?;
+    let mut connection = client
+        .get_multiplexed_async_connection()
+        .await
+        .map_err(|error| format!("redis connection error: {error}"))?;
+
+    redis::cmd("PUBLISH")
+        .arg(REDIS_WS_CHANNEL)
+        .arg(payload)
+        .query_async::<usize>(&mut connection)
+        .await
+        .map_err(|error| format!("redis publish command failed: {error}"))?;
+
+    Ok(())
+}
+
+fn spawn_redis_subscriber(
+    redis_url: String,
+    workspaces: Arc<RwLock<HashMap<Uuid, broadcast::Sender<WsEventEnvelope>>>>,
+    instance_id: String,
+) {
+    tokio::spawn(async move {
+        loop {
+            if let Err(error) =
+                run_redis_subscriber(&redis_url, workspaces.clone(), &instance_id).await
+            {
+                warn!("redis subscriber failed, reconnecting: {}", error);
+                sleep(Duration::from_secs(1)).await;
+            }
+        }
+    });
+}
+
+async fn run_redis_subscriber(
+    redis_url: &str,
+    workspaces: Arc<RwLock<HashMap<Uuid, broadcast::Sender<WsEventEnvelope>>>>,
+    instance_id: &str,
+) -> Result<(), String> {
+    let client =
+        redis::Client::open(redis_url).map_err(|error| format!("invalid redis url: {error}"))?;
+    let mut pubsub = client
+        .get_async_pubsub()
+        .await
+        .map_err(|error| format!("redis pubsub connection error: {error}"))?;
+
+    pubsub
+        .subscribe(REDIS_WS_CHANNEL)
+        .await
+        .map_err(|error| format!("redis subscribe failed: {error}"))?;
+
+    let mut stream = pubsub.on_message();
+    while let Some(message) = stream.next().await {
+        let payload = message
+            .get_payload::<String>()
+            .map_err(|error| format!("invalid redis payload: {error}"))?;
+
+        let envelope: RedisEventEnvelope = match serde_json::from_str(&payload) {
+            Ok(parsed) => parsed,
+            Err(_) => continue,
+        };
+
+        if envelope.source_instance_id == instance_id {
+            continue;
+        }
+
+        let Some(workspace_id) = envelope.event.workspace_id else {
+            continue;
+        };
+
+        emit_workspace_event(&workspaces, workspace_id, envelope.event).await;
+    }
+
+    Ok(())
+}
+
+async fn emit_workspace_event(
+    workspaces: &Arc<RwLock<HashMap<Uuid, broadcast::Sender<WsEventEnvelope>>>>,
+    workspace_id: Uuid,
+    event: WsEventEnvelope,
+) {
+    let sender = {
+        let mut map = workspaces.write().await;
+        map.entry(workspace_id)
+            .or_insert_with(|| broadcast::channel::<WsEventEnvelope>(1024).0)
+            .clone()
+    };
+    let _ = sender.send(event);
 }
 
 #[utoipa::path(

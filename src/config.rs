@@ -10,6 +10,7 @@ pub struct Config {
     pub bootstrap_password: String,
     pub persistence_backend: PersistenceBackend,
     pub mongo_uri: Option<String>,
+    pub redis_url: Option<String>,
 }
 
 impl Config {
@@ -35,6 +36,7 @@ impl Config {
                 .map(PersistenceBackend::from_env_value)
                 .unwrap_or(PersistenceBackend::Memory),
             mongo_uri: read_env("MONGO_URI"),
+            redis_url: read_env("REDIS_URL"),
         }
     }
 }

@@ -40,6 +40,7 @@ Run (con Mongo externo):
 docker run --rm -p 3000:3000 \
   -e PERSISTENCE_BACKEND=mongo \
   -e MONGO_URI='mongodb://root:password@host.docker.internal:27017/?authSource=admin' \
+  -e REDIS_URL='redis://host.docker.internal:6379' \
   -e JWT_SECRET='dev-only-change-me-in-prod' \
   galynx-api:local
 ```
@@ -54,3 +55,4 @@ docker run --rm -p 3000:3000 \
 - `BOOTSTRAP_PASSWORD` (default `ChangeMe123!`)
 - `PERSISTENCE_BACKEND` (`memory` o `mongo`)
 - `MONGO_URI` (requerida cuando `PERSISTENCE_BACKEND=mongo`)
+- `REDIS_URL` (opcional, habilita pub/sub realtime entre réplicas)
