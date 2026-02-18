@@ -64,8 +64,9 @@ async fn start_server(tag: &str) -> TestServer {
     let owner_password = "ChangeMe123!".to_string();
     let workspace_name = format!("ci-{tag}-{unique}");
 
-    let mongo_uri = std::env::var("TEST_MONGO_URI")
-        .unwrap_or_else(|_| "mongodb://root:password@127.0.0.1:27017/?authSource=admin".to_string());
+    let mongo_uri = std::env::var("TEST_MONGO_URI").unwrap_or_else(|_| {
+        "mongodb://root:password@127.0.0.1:27017/?authSource=admin".to_string()
+    });
     let redis_url =
         std::env::var("TEST_REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
 
@@ -104,7 +105,11 @@ async fn start_server(tag: &str) -> TestServer {
 async fn wait_until_ready(server: &mut TestServer) {
     let client = Client::new();
     for _ in 0..120 {
-        if let Some(status) = server.child.try_wait().expect("failed to poll child process") {
+        if let Some(status) = server
+            .child
+            .try_wait()
+            .expect("failed to poll child process")
+        {
             panic!("galynx-api exited before ready: {status}");
         }
 
@@ -121,7 +126,13 @@ async fn wait_until_ready(server: &mut TestServer) {
     panic!("galynx-api did not become ready in time");
 }
 
-async fn login(client: &Client, base_url: &str, email: &str, password: &str, workspace_id: Option<Uuid>) -> AuthTokensResponse {
+async fn login(
+    client: &Client,
+    base_url: &str,
+    email: &str,
+    password: &str,
+    workspace_id: Option<Uuid>,
+) -> AuthTokensResponse {
     client
         .post(format!("{base_url}/api/v1/auth/login"))
         .json(&json!({
@@ -183,7 +194,10 @@ async fn integration_http_flow() {
         .expect("failed to decode channel response");
 
     client
-        .post(format!("{}/api/v1/channels/{}/messages", server.base_url, channel.id))
+        .post(format!(
+            "{}/api/v1/channels/{}/messages",
+            server.base_url, channel.id
+        ))
         .bearer_auth(&tokens.access_token)
         .json(&json!({ "body_md": "hello from integration" }))
         .send()
@@ -193,7 +207,10 @@ async fn integration_http_flow() {
         .expect("create message failed");
 
     let list_messages = client
-        .get(format!("{}/api/v1/channels/{}/messages", server.base_url, channel.id))
+        .get(format!(
+            "{}/api/v1/channels/{}/messages",
+            server.base_url, channel.id
+        ))
         .bearer_auth(&tokens.access_token)
         .send()
         .await
@@ -205,7 +222,9 @@ async fn integration_http_flow() {
         .expect("failed to decode message page");
 
     assert!(
-        list_messages["items"].as_array().is_some_and(|items| !items.is_empty()),
+        list_messages["items"]
+            .as_array()
+            .is_some_and(|items| !items.is_empty()),
         "expected at least one message"
     );
 
@@ -222,7 +241,9 @@ async fn integration_http_flow() {
         .expect("failed to decode audit response");
 
     assert!(
-        audit["items"].as_array().is_some_and(|items| !items.is_empty()),
+        audit["items"]
+            .as_array()
+            .is_some_and(|items| !items.is_empty()),
         "expected non-empty audit log in workspace {}",
         me.workspace_id
     );
@@ -308,9 +329,7 @@ async fn ws_command_flow() {
             .expect("websocket read failed");
         if let tokio_tungstenite::tungstenite::Message::Text(text) = frame {
             let event: Value = serde_json::from_str(&text).expect("invalid websocket json");
-            if event["event_type"] == "ACK"
-                && event["payload"]["command"] == "SEND_MESSAGE"
-            {
+            if event["event_type"] == "ACK" && event["payload"]["command"] == "SEND_MESSAGE" {
                 got_ack = true;
                 break;
             }
@@ -394,11 +413,20 @@ async fn e2e_smoke_flow() {
         .await
         .expect("failed to decode channel response");
 
-    let member_tokens =
-        login(&client, &server.base_url, &member_email, member_password, Some(workspace.id)).await;
+    let member_tokens = login(
+        &client,
+        &server.base_url,
+        &member_email,
+        member_password,
+        Some(workspace.id),
+    )
+    .await;
 
     client
-        .post(format!("{}/api/v1/channels/{}/messages", server.base_url, channel.id))
+        .post(format!(
+            "{}/api/v1/channels/{}/messages",
+            server.base_url, channel.id
+        ))
         .bearer_auth(&member_tokens.access_token)
         .json(&json!({ "body_md": "hello from e2e member" }))
         .send()
@@ -420,7 +448,9 @@ async fn e2e_smoke_flow() {
         .expect("failed to decode audit response");
 
     assert!(
-        audit["items"].as_array().is_some_and(|items| !items.is_empty()),
+        audit["items"]
+            .as_array()
+            .is_some_and(|items| !items.is_empty()),
         "expected non-empty audit log in e2e workspace"
     );
 }
