@@ -80,6 +80,16 @@ pub struct MessageListResponse {
     pub next_cursor: Option<String>,
 }
 
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ChannelMemberResponse {
+    pub user_id: Uuid,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct AddChannelMemberRequest {
+    pub user_id: Uuid,
+}
+
 #[derive(Debug, Deserialize, IntoParams)]
 pub struct MessageQuery {
     pub cursor: Option<String>,
@@ -90,6 +100,14 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/v1/channels", get(list_channels).post(create_channel))
         .route("/api/v1/channels/:id", delete(delete_channel))
+        .route(
+            "/api/v1/channels/:id/members",
+            get(list_channel_members).post(add_channel_member),
+        )
+        .route(
+            "/api/v1/channels/:id/members/:user_id",
+            delete(remove_channel_member),
+        )
         .route(
             "/api/v1/channels/:id/messages",
             get(list_messages).post(create_message),
@@ -148,7 +166,10 @@ impl ChannelService {
             created_at: Utc::now().timestamp_millis(),
         };
         let response = ChannelResponse::from(&channel);
-        self.storage.insert_channel(channel).await;
+        self.storage.insert_channel(channel.clone()).await;
+        if channel.is_private {
+            self.storage.add_channel_member(channel.id, created_by).await;
+        }
         Ok(response)
     }
 
@@ -162,7 +183,77 @@ impl ChannelService {
         }
 
         self.storage.remove_channel(&channel_id).await;
+        self.storage.remove_channel_members(channel_id).await;
         self.storage.remove_messages_for_channel(channel_id).await;
+        Ok(())
+    }
+
+    pub async fn list_channel_members(
+        &self,
+        workspace_id: Uuid,
+        channel_id: Uuid,
+    ) -> ApiResult<Vec<ChannelMemberResponse>> {
+        self.ensure_bootstrap_seed().await;
+        let channel = self
+            .storage
+            .get_channel(&channel_id)
+            .await
+            .ok_or_else(|| ApiError::NotFound("channel not found".to_string()))?;
+        if channel.workspace_id != workspace_id {
+            return Err(ApiError::NotFound("channel not found".to_string()));
+        }
+
+        let mut users = self.storage.list_channel_members(channel_id).await;
+        users.sort_unstable();
+        users.dedup();
+        Ok(users
+            .into_iter()
+            .map(|user_id| ChannelMemberResponse { user_id })
+            .collect())
+    }
+
+    pub async fn add_channel_member(
+        &self,
+        workspace_id: Uuid,
+        channel_id: Uuid,
+        user_id: Uuid,
+    ) -> ApiResult<()> {
+        self.ensure_bootstrap_seed().await;
+        let channel = self
+            .storage
+            .get_channel(&channel_id)
+            .await
+            .ok_or_else(|| ApiError::NotFound("channel not found".to_string()))?;
+        if channel.workspace_id != workspace_id {
+            return Err(ApiError::NotFound("channel not found".to_string()));
+        }
+
+        let membership = self.storage.get_membership_role(workspace_id, user_id).await;
+        if membership.is_none() {
+            return Err(ApiError::BadRequest(
+                "user does not belong to workspace".to_string(),
+            ));
+        }
+        self.storage.add_channel_member(channel_id, user_id).await;
+        Ok(())
+    }
+
+    pub async fn remove_channel_member(
+        &self,
+        workspace_id: Uuid,
+        channel_id: Uuid,
+        user_id: Uuid,
+    ) -> ApiResult<()> {
+        self.ensure_bootstrap_seed().await;
+        let channel = self
+            .storage
+            .get_channel(&channel_id)
+            .await
+            .ok_or_else(|| ApiError::NotFound("channel not found".to_string()))?;
+        if channel.workspace_id != workspace_id {
+            return Err(ApiError::NotFound("channel not found".to_string()));
+        }
+        self.storage.remove_channel_member(channel_id, user_id).await;
         Ok(())
     }
 
@@ -178,8 +269,7 @@ impl ChannelService {
             return Err(ApiError::BadRequest("message body is required".to_string()));
         }
 
-        self.assert_channel_access(context.workspace_id, channel_id)
-            .await?;
+        self.assert_channel_access(context, channel_id).await?;
 
         let message = MessageRecordStore {
             id: Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
@@ -200,12 +290,12 @@ impl ChannelService {
 
     pub async fn list_messages(
         &self,
-        workspace_id: Uuid,
+        context: &AuthContext,
         channel_id: Uuid,
         query: &MessageQuery,
     ) -> ApiResult<MessageListResponse> {
         self.ensure_bootstrap_seed().await;
-        self.assert_channel_access(workspace_id, channel_id).await?;
+        self.assert_channel_access(context, channel_id).await?;
 
         let limit = query.limit.unwrap_or(50).clamp(1, 100);
         let before = query
@@ -215,7 +305,7 @@ impl ChannelService {
             .transpose()
             .map_err(|error| ApiError::BadRequest(format!("invalid cursor: {error}")))?;
 
-        let messages = self.storage.list_messages(workspace_id).await;
+        let messages = self.storage.list_messages(context.workspace_id).await;
         let mut channel_messages: Vec<&MessageRecordStore> = messages
             .iter()
             .filter(|message| message.channel_id == channel_id && message.deleted_at.is_none())
@@ -326,30 +416,18 @@ impl ChannelService {
         Ok(MessageResponse::from(&message))
     }
 
-    pub async fn ensure_channel_access(
-        &self,
-        workspace_id: Uuid,
-        channel_id: Uuid,
-    ) -> ApiResult<()> {
-        self.assert_channel_access(workspace_id, channel_id).await
+    pub async fn ensure_channel_access(&self, context: &AuthContext, channel_id: Uuid) -> ApiResult<()> {
+        self.assert_channel_access(context, channel_id).await
     }
 
     pub async fn thread_summary(
         &self,
-        workspace_id: Uuid,
+        context: &AuthContext,
         root_id: Uuid,
     ) -> ApiResult<ThreadSummaryResponse> {
         self.ensure_bootstrap_seed().await;
-        let messages = self.storage.list_messages(workspace_id).await;
-        let root_message = messages
-            .iter()
-            .find(|message| message.id == root_id)
-            .ok_or_else(|| ApiError::NotFound("thread root not found".to_string()))?;
-        if root_message.thread_root_id.is_some() {
-            return Err(ApiError::BadRequest(
-                "thread root must be a top-level message".to_string(),
-            ));
-        }
+        let root_message = self.assert_thread_root(context, root_id).await?;
+        let messages = self.storage.list_messages(context.workspace_id).await;
 
         let mut reply_count = 0usize;
         let mut last_reply_at = None;
@@ -367,7 +445,7 @@ impl ChannelService {
         }
 
         Ok(ThreadSummaryResponse {
-            root_message: MessageResponse::from(root_message),
+            root_message: MessageResponse::from(&root_message),
             reply_count,
             last_reply_at,
             participants,
@@ -376,12 +454,12 @@ impl ChannelService {
 
     pub async fn list_thread_replies(
         &self,
-        workspace_id: Uuid,
+        context: &AuthContext,
         root_id: Uuid,
         query: &MessageQuery,
     ) -> ApiResult<MessageListResponse> {
         self.ensure_bootstrap_seed().await;
-        self.assert_thread_root(workspace_id, root_id).await?;
+        self.assert_thread_root(context, root_id).await?;
 
         let limit = query.limit.unwrap_or(50).clamp(1, 100);
         let before = query
@@ -391,7 +469,7 @@ impl ChannelService {
             .transpose()
             .map_err(|error| ApiError::BadRequest(format!("invalid cursor: {error}")))?;
 
-        let messages = self.storage.list_messages(workspace_id).await;
+        let messages = self.storage.list_messages(context.workspace_id).await;
         let mut replies: Vec<&MessageRecordStore> = messages
             .iter()
             .filter(|message| {
@@ -458,8 +536,7 @@ impl ChannelService {
         if workspace_id != context.workspace_id {
             return Err(ApiError::NotFound("thread root not found".to_string()));
         }
-        self.assert_channel_access(context.workspace_id, channel_id)
-            .await?;
+        self.assert_channel_access(context, channel_id).await?;
 
         let reply = MessageRecordStore {
             id: Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
@@ -478,30 +555,44 @@ impl ChannelService {
         Ok(response)
     }
 
-    async fn assert_channel_access(&self, workspace_id: Uuid, channel_id: Uuid) -> ApiResult<()> {
+    async fn assert_channel_access(&self, context: &AuthContext, channel_id: Uuid) -> ApiResult<()> {
         let channel = self
             .storage
             .get_channel(&channel_id)
             .await
             .ok_or_else(|| ApiError::NotFound("channel not found".to_string()))?;
 
-        if channel.workspace_id != workspace_id {
+        if channel.workspace_id != context.workspace_id {
             return Err(ApiError::NotFound("channel not found".to_string()));
+        }
+        if channel.is_private {
+            let can_bypass = matches!(context.role, WorkspaceRole::Owner | WorkspaceRole::Admin);
+            if !can_bypass
+                && !self
+                    .storage
+                    .is_channel_member(channel_id, context.user_id)
+                    .await
+            {
+                return Err(ApiError::Unauthorized(
+                    "you do not have access to this private channel".to_string(),
+                ));
+            }
         }
 
         Ok(())
     }
 
-    async fn assert_thread_root(&self, workspace_id: Uuid, root_id: Uuid) -> ApiResult<()> {
+    async fn assert_thread_root(&self, context: &AuthContext, root_id: Uuid) -> ApiResult<MessageRecordStore> {
         let root = self
             .storage
             .get_message(&root_id)
             .await
             .ok_or_else(|| ApiError::NotFound("thread root not found".to_string()))?;
-        if root.workspace_id != workspace_id || root.thread_root_id.is_some() {
+        if root.workspace_id != context.workspace_id || root.thread_root_id.is_some() {
             return Err(ApiError::NotFound("thread root not found".to_string()));
         }
-        Ok(())
+        self.assert_channel_access(context, root.channel_id).await?;
+        Ok(root)
     }
 
     async fn ensure_bootstrap_seed(&self) {
@@ -707,6 +798,108 @@ pub(crate) async fn delete_channel(
 }
 
 #[utoipa::path(
+    get,
+    path = "/api/v1/channels/{id}/members",
+    responses(
+        (status = 200, description = "List channel members", body = [ChannelMemberResponse]),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Channel not found", body = ErrorResponse)
+    )
+)]
+pub(crate) async fn list_channel_members(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(channel_id): Path<Uuid>,
+) -> ApiResult<Json<Vec<ChannelMemberResponse>>> {
+    let context = state
+        .auth
+        .authenticate_headers(&headers, &state.config.jwt_secret)
+        .await?;
+    ensure_channel_admin(&context)?;
+    let items = state
+        .channels
+        .list_channel_members(context.workspace_id, channel_id)
+        .await?;
+    Ok(Json(items))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/channels/{id}/members",
+    request_body = AddChannelMemberRequest,
+    responses(
+        (status = 204, description = "Channel member added"),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Channel not found", body = ErrorResponse)
+    )
+)]
+pub(crate) async fn add_channel_member(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(channel_id): Path<Uuid>,
+    Json(payload): Json<AddChannelMemberRequest>,
+) -> ApiResult<StatusCode> {
+    let context = state
+        .auth
+        .authenticate_headers(&headers, &state.config.jwt_secret)
+        .await?;
+    ensure_channel_admin(&context)?;
+    state
+        .channels
+        .add_channel_member(context.workspace_id, channel_id, payload.user_id)
+        .await?;
+    state
+        .audit
+        .write(
+            context.workspace_id,
+            Some(context.user_id),
+            "CHANNEL_MEMBER_ADDED",
+            "channel",
+            Some(channel_id.to_string()),
+            json!({ "member_user_id": payload.user_id }),
+        )
+        .await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/channels/{id}/members/{user_id}",
+    responses(
+        (status = 204, description = "Channel member removed"),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Channel not found", body = ErrorResponse)
+    )
+)]
+pub(crate) async fn remove_channel_member(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((channel_id, user_id)): Path<(Uuid, Uuid)>,
+) -> ApiResult<StatusCode> {
+    let context = state
+        .auth
+        .authenticate_headers(&headers, &state.config.jwt_secret)
+        .await?;
+    ensure_channel_admin(&context)?;
+    state
+        .channels
+        .remove_channel_member(context.workspace_id, channel_id, user_id)
+        .await?;
+    state
+        .audit
+        .write(
+            context.workspace_id,
+            Some(context.user_id),
+            "CHANNEL_MEMBER_REMOVED",
+            "channel",
+            Some(channel_id.to_string()),
+            json!({ "member_user_id": user_id }),
+        )
+        .await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
     post,
     path = "/api/v1/channels/{id}/messages",
     request_body = CreateMessageRequest,
@@ -779,7 +972,7 @@ pub(crate) async fn list_messages(
         .await?;
     let page = state
         .channels
-        .list_messages(context.workspace_id, channel_id, &query)
+        .list_messages(&context, channel_id, &query)
         .await?;
     Ok(Json(page))
 }
@@ -926,7 +1119,7 @@ mod tests {
 
         let first_page = service
             .list_messages(
-                workspace_id,
+                &context,
                 channel_id,
                 &MessageQuery {
                     cursor: None,
@@ -940,7 +1133,7 @@ mod tests {
 
         let second_page = service
             .list_messages(
-                workspace_id,
+                &context,
                 channel_id,
                 &MessageQuery {
                     cursor: first_page.next_cursor,
@@ -1018,10 +1211,136 @@ mod tests {
             .expect("member reply should be created");
 
         let summary = service
-            .thread_summary(workspace_id, root.id)
+            .thread_summary(&owner_ctx, root.id)
             .await
             .expect("thread summary should work");
         assert_eq!(summary.reply_count, 2);
         assert_eq!(summary.participants.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn private_channel_requires_membership_for_member_role() {
+        let workspace_id = Uuid::new_v4();
+        let owner_id = Uuid::new_v4();
+        let member_id = Uuid::new_v4();
+        let storage = Arc::new(
+            Storage::new(PersistenceBackend::Memory, None)
+                .await
+                .expect("memory storage should init"),
+        );
+        let service = ChannelService::new(storage.clone(), workspace_id, owner_id);
+
+        let owner_ctx = AuthContext {
+            user_id: owner_id,
+            workspace_id,
+            role: WorkspaceRole::Owner,
+        };
+        let member_ctx = AuthContext {
+            user_id: member_id,
+            workspace_id,
+            role: WorkspaceRole::Member,
+        };
+
+        let private_channel = service
+            .create_channel(
+                workspace_id,
+                owner_id,
+                CreateChannelRequest {
+                    name: "private-team".to_string(),
+                    is_private: true,
+                },
+            )
+            .await
+            .expect("private channel should be created");
+
+        let denied = service
+            .create_message(
+                &member_ctx,
+                private_channel.id,
+                CreateMessageRequest {
+                    body_md: "hi".to_string(),
+                },
+            )
+            .await
+            .expect_err("member should not access private channel");
+        assert!(matches!(denied, ApiError::Unauthorized(_)));
+
+        storage
+            .add_channel_member(private_channel.id, member_id)
+            .await;
+
+        let created = service
+            .create_message(
+                &member_ctx,
+                private_channel.id,
+                CreateMessageRequest {
+                    body_md: "hi".to_string(),
+                },
+            )
+            .await
+            .expect("member should access private channel after membership");
+        assert_eq!(created.channel_id, private_channel.id);
+
+        // owner/admin bypasses channel membership checks
+        let owner_created = service
+            .create_message(
+                &owner_ctx,
+                private_channel.id,
+                CreateMessageRequest {
+                    body_md: "owner".to_string(),
+                },
+            )
+            .await
+            .expect("owner should access private channel");
+        assert_eq!(owner_created.channel_id, private_channel.id);
+    }
+
+    #[tokio::test]
+    async fn channel_member_management_roundtrip() {
+        let workspace_id = Uuid::new_v4();
+        let owner_id = Uuid::new_v4();
+        let member_id = Uuid::new_v4();
+        let storage = Arc::new(
+            Storage::new(PersistenceBackend::Memory, None)
+                .await
+                .expect("memory storage should init"),
+        );
+        storage
+            .put_membership_role(workspace_id, member_id, "member")
+            .await;
+        let service = ChannelService::new(storage.clone(), workspace_id, owner_id);
+
+        let private_channel = service
+            .create_channel(
+                workspace_id,
+                owner_id,
+                CreateChannelRequest {
+                    name: "ops-private".to_string(),
+                    is_private: true,
+                },
+            )
+            .await
+            .expect("private channel should be created");
+
+        service
+            .add_channel_member(workspace_id, private_channel.id, member_id)
+            .await
+            .expect("add member should work");
+
+        let members = service
+            .list_channel_members(workspace_id, private_channel.id)
+            .await
+            .expect("list members should work");
+        assert!(members.iter().any(|item| item.user_id == member_id));
+
+        service
+            .remove_channel_member(workspace_id, private_channel.id, member_id)
+            .await
+            .expect("remove member should work");
+        let members_after = service
+            .list_channel_members(workspace_id, private_channel.id)
+            .await
+            .expect("list members should work after removal");
+        assert!(!members_after.iter().any(|item| item.user_id == member_id));
     }
 }

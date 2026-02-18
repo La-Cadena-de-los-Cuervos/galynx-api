@@ -619,7 +619,7 @@ async fn handle_client_text(
             let page = state
                 .channels
                 .list_messages(
-                    context.workspace_id,
+                    context,
                     payload.channel_id,
                     &MessageQuery {
                         cursor: payload.cursor,
@@ -640,12 +640,12 @@ async fn handle_client_text(
                 .map_err(|_| ApiError::BadRequest("invalid FETCH_THREAD payload".to_string()))?;
             let summary = state
                 .channels
-                .thread_summary(context.workspace_id, payload.root_id)
+                .thread_summary(context, payload.root_id)
                 .await?;
             let replies = state
                 .channels
                 .list_thread_replies(
-                    context.workspace_id,
+                    context,
                     payload.root_id,
                     &MessageQuery {
                         cursor: payload.cursor,

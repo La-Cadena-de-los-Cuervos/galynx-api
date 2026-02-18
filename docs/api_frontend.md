@@ -186,7 +186,42 @@ Request:
 
 Response: `201`.
 
+Nota de acceso:
+
+- Si `is_private=true`, solo miembros explícitos del canal pueden leer/publicar.
+- `owner` y `admin` pueden acceder aunque no estén en `channel_members`.
+
 ### `DELETE /api/v1/channels/:id`
+
+Requiere rol `owner` o `admin`.
+
+Response: `204`.
+
+### `GET /api/v1/channels/:id/members`
+
+Requiere rol `owner` o `admin`.
+
+Response `200`:
+
+```json
+[
+  { "user_id": "uuid" }
+]
+```
+
+### `POST /api/v1/channels/:id/members`
+
+Requiere rol `owner` o `admin`.
+
+Request:
+
+```json
+{ "user_id": "uuid" }
+```
+
+Response: `204`.
+
+### `DELETE /api/v1/channels/:id/members/:user_id`
 
 Requiere rol `owner` o `admin`.
 

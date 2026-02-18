@@ -82,6 +82,9 @@ cargo run --bin galynx -- audit list --limit 20
 - `GET /api/v1/channels`
 - `POST /api/v1/channels`
 - `DELETE /api/v1/channels/:id`
+- `GET /api/v1/channels/:id/members`
+- `POST /api/v1/channels/:id/members`
+- `DELETE /api/v1/channels/:id/members/:user_id`
 
 ### Messages
 
@@ -114,6 +117,9 @@ cargo run --bin galynx -- audit list --limit 20
 - `galynx channels list`
 - `galynx channels create --name <name> [--private]`
 - `galynx channels delete <channel_id>`
+- `galynx channels members <channel_id>`
+- `galynx channels member-add <channel_id> --user <user_id>`
+- `galynx channels member-remove <channel_id> --user <user_id>`
 - `galynx messages list --channel <id> [--cursor <cursor>] [--limit <n>]`
 - `galynx messages send --channel <id> --body "..."`
 - `galynx messages edit <message_id> --body "..."`

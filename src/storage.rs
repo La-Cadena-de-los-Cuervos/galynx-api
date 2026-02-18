@@ -35,6 +35,7 @@ pub struct Storage {
     attachments: Arc<RwLock<HashMap<Uuid, AttachmentRecordStore>>>,
     reactions: Arc<RwLock<HashSet<(Uuid, String, Uuid)>>>,
     channels: Arc<RwLock<HashMap<Uuid, ChannelRecordStore>>>,
+    channel_members: Arc<RwLock<HashSet<(Uuid, Uuid)>>>,
     messages: Arc<RwLock<HashMap<Uuid, MessageRecordStore>>>,
     auth_users: Arc<RwLock<HashMap<Uuid, AuthUserRecordStore>>>,
     auth_users_by_email: Arc<RwLock<HashMap<String, Uuid>>>,
@@ -51,6 +52,7 @@ struct MongoState {
     attachments: Collection<Document>,
     reactions: Collection<Document>,
     channels: Collection<Document>,
+    channel_members: Collection<Document>,
     messages: Collection<Document>,
     auth_users: Collection<Document>,
     auth_memberships: Collection<Document>,
@@ -157,6 +159,7 @@ impl Storage {
                 attachments: database.collection::<Document>("attachments"),
                 reactions: database.collection::<Document>("reactions"),
                 channels: database.collection::<Document>("channels"),
+                channel_members: database.collection::<Document>("channel_members"),
                 messages: database.collection::<Document>("messages"),
                 auth_users: database.collection::<Document>("auth_users"),
                 auth_memberships: database.collection::<Document>("auth_memberships"),
@@ -178,6 +181,7 @@ impl Storage {
             attachments: Arc::new(RwLock::new(HashMap::new())),
             reactions: Arc::new(RwLock::new(HashSet::new())),
             channels: Arc::new(RwLock::new(HashMap::new())),
+            channel_members: Arc::new(RwLock::new(HashSet::new())),
             messages: Arc::new(RwLock::new(HashMap::new())),
             auth_users: Arc::new(RwLock::new(HashMap::new())),
             auth_users_by_email: Arc::new(RwLock::new(HashMap::new())),
@@ -539,6 +543,96 @@ impl Storage {
             }
         }
         deleted
+    }
+
+    pub async fn add_channel_member(&self, channel_id: Uuid, user_id: Uuid) {
+        self.channel_members.write().await.insert((channel_id, user_id));
+        if let Some(mongo) = &self.mongo {
+            let id = format!("{channel_id}:{user_id}");
+            let document = doc! {
+                "_id": id.clone(),
+                "channel_id": channel_id.to_string(),
+                "user_id": user_id.to_string(),
+            };
+            let _ = mongo.channel_members.delete_one(doc! { "_id": id }).await;
+            let _ = mongo.channel_members.insert_one(document).await;
+        }
+    }
+
+    pub async fn list_channel_members(&self, channel_id: Uuid) -> Vec<Uuid> {
+        if let Some(mongo) = &self.mongo {
+            let mut users = Vec::new();
+            if let Ok(mut cursor) = mongo
+                .channel_members
+                .find(doc! { "channel_id": channel_id.to_string() })
+                .await
+            {
+                while let Ok(true) = cursor.advance().await {
+                    let Ok(document) = cursor.deserialize_current() else {
+                        continue;
+                    };
+                    if let Some(user_id) = uuid_field(&document, "user_id") {
+                        users.push(user_id);
+                    }
+                }
+                return users;
+            }
+        }
+
+        self.channel_members
+            .read()
+            .await
+            .iter()
+            .filter_map(|(stored_channel_id, user_id)| {
+                (*stored_channel_id == channel_id).then_some(*user_id)
+            })
+            .collect()
+    }
+
+    pub async fn is_channel_member(&self, channel_id: Uuid, user_id: Uuid) -> bool {
+        if let Some(mongo) = &self.mongo {
+            if let Ok(found) = mongo
+                .channel_members
+                .find_one(doc! {
+                    "channel_id": channel_id.to_string(),
+                    "user_id": user_id.to_string(),
+                })
+                .await
+            {
+                return found.is_some();
+            }
+        }
+
+        self.channel_members
+            .read()
+            .await
+            .contains(&(channel_id, user_id))
+    }
+
+    pub async fn remove_channel_member(&self, channel_id: Uuid, user_id: Uuid) {
+        self.channel_members.write().await.remove(&(channel_id, user_id));
+        if let Some(mongo) = &self.mongo {
+            let _ = mongo
+                .channel_members
+                .delete_one(doc! {
+                    "channel_id": channel_id.to_string(),
+                    "user_id": user_id.to_string(),
+                })
+                .await;
+        }
+    }
+
+    pub async fn remove_channel_members(&self, channel_id: Uuid) {
+        self.channel_members
+            .write()
+            .await
+            .retain(|(stored_channel_id, _)| *stored_channel_id != channel_id);
+        if let Some(mongo) = &self.mongo {
+            let _ = mongo
+                .channel_members
+                .delete_many(doc! { "channel_id": channel_id.to_string() })
+                .await;
+        }
     }
 
     pub async fn channel_name_exists(&self, workspace_id: Uuid, name: &str) -> bool {
@@ -985,6 +1079,15 @@ async fn ensure_mongo_indexes(state: &MongoState) -> Result<(), mongodb::error::
         .create_index(
             IndexModel::builder()
                 .keys(doc! { "workspace_id": 1, "name": 1 })
+                .options(IndexOptions::builder().unique(true).build())
+                .build(),
+        )
+        .await?;
+    state
+        .channel_members
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "channel_id": 1, "user_id": 1 })
                 .options(IndexOptions::builder().unique(true).build())
                 .build(),
         )

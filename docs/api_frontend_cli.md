@@ -208,9 +208,32 @@ Body:
 
 Respuesta `201`: `ChannelResponse`.
 
+Regla de acceso para canales privados:
+
+- Si `is_private=true`, solo miembros explícitos del canal pueden leer/publicar.
+- `owner` y `admin` tienen bypass de membresía.
+
 ### `DELETE /api/v1/channels/:id`
 
 Respuesta `204`.
+
+### `GET /api/v1/channels/:id/members`
+
+Requiere rol `owner` o `admin`.
+
+### `POST /api/v1/channels/:id/members`
+
+Body:
+
+```json
+{ "user_id": "uuid" }
+```
+
+Requiere rol `owner` o `admin`. Respuesta `204`.
+
+### `DELETE /api/v1/channels/:id/members/:user_id`
+
+Requiere rol `owner` o `admin`. Respuesta `204`.
 
 ## 7) Messages
 

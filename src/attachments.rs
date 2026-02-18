@@ -401,7 +401,7 @@ pub(crate) async fn presign(
         .await?;
     state
         .channels
-        .ensure_channel_access(context.workspace_id, payload.channel_id)
+        .ensure_channel_access(&context, payload.channel_id)
         .await?;
     let response = state.attachments.presign(&context, payload).await?;
     state

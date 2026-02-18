@@ -46,7 +46,7 @@ pub(crate) async fn get_thread(
         .await?;
     let summary = state
         .channels
-        .thread_summary(context.workspace_id, root_id)
+        .thread_summary(&context, root_id)
         .await?;
     Ok(Json(summary))
 }
@@ -73,7 +73,7 @@ pub(crate) async fn list_replies(
         .await?;
     let page = state
         .channels
-        .list_thread_replies(context.workspace_id, root_id, &query)
+        .list_thread_replies(&context, root_id, &query)
         .await?;
     Ok(Json(page))
 }
@@ -115,7 +115,7 @@ pub(crate) async fn create_reply(
         .await;
     let summary = state
         .channels
-        .thread_summary(context.workspace_id, root_id)
+        .thread_summary(&context, root_id)
         .await?;
     state
         .realtime

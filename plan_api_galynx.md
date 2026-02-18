@@ -155,12 +155,14 @@ Construir `galynx-api` como un monolito modular en Rust que cubra auth, roles, c
 - Idempotencia WS implementada para comandos mutantes (`SEND_MESSAGE`, `EDIT_MESSAGE`, `DELETE_MESSAGE`, `ADD_REACTION`, `REMOVE_REACTION`) con `client_msg_id`.
 - Índices Mongo base creados al arranque (unique + consulta) y TTL para expiración de `refresh_sessions`.
 - Attachments con presign/download reales S3 compatibles (MinIO mediante `S3_*` env vars).
+- Canales privados con control de acceso por membresía explícita (`channel_members`) y bypass owner/admin.
+- API para gestionar membresía de canal (`GET/POST/DELETE /channels/{id}/members`).
 - Persistencia Mongo operativa (con configuración por env).
 - CLI funcional para operaciones principales.
 - Empaquetado Docker (`Dockerfile` + `docker-compose.yml`).
 
 ### Pendiente para siguiente fase
-- Completar modelo de datos objetivo (workspaces/channel_members y privados con membresía explícita).
+- Completar modelo de datos objetivo (`workspaces` y onboarding de usuarios para administración de `channel_members`).
 - Agregar observabilidad avanzada (métricas y trazas OTel).
 - Completar CI bloqueante con integración/WS/e2e smoke.
 - Añadir bootstrap operativo formal (script/flujo de inicialización).
