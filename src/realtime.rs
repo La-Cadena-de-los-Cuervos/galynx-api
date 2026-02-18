@@ -480,6 +480,30 @@ async fn handle_client_text(
         "EDIT_MESSAGE" => {
             let payload: EditMessagePayload = serde_json::from_value(command.payload.clone())
                 .map_err(|_| ApiError::BadRequest("invalid EDIT_MESSAGE payload".to_string()))?;
+            if let Some(client_msg_id) = normalize_client_msg_id(command.client_msg_id.as_deref())?
+            {
+                let dedup_key = ws_command_once_key(
+                    context.workspace_id,
+                    context.user_id,
+                    "EDIT_MESSAGE",
+                    &format!("message:{}", payload.message_id),
+                    &client_msg_id,
+                );
+                if state.storage.has_ws_command_once(&dedup_key).await {
+                    send_ack(
+                        socket,
+                        "EDIT_MESSAGE",
+                        command.client_msg_id,
+                        json!({"message_id": payload.message_id, "deduped": true}),
+                    )
+                    .await?;
+                    return Ok(());
+                }
+                state
+                    .storage
+                    .put_ws_command_once(&dedup_key, Utc::now().timestamp_millis())
+                    .await;
+            }
             let message = state
                 .channels
                 .update_message(
@@ -525,6 +549,30 @@ async fn handle_client_text(
         "DELETE_MESSAGE" => {
             let payload: DeleteMessagePayload = serde_json::from_value(command.payload.clone())
                 .map_err(|_| ApiError::BadRequest("invalid DELETE_MESSAGE payload".to_string()))?;
+            if let Some(client_msg_id) = normalize_client_msg_id(command.client_msg_id.as_deref())?
+            {
+                let dedup_key = ws_command_once_key(
+                    context.workspace_id,
+                    context.user_id,
+                    "DELETE_MESSAGE",
+                    &format!("message:{}", payload.message_id),
+                    &client_msg_id,
+                );
+                if state.storage.has_ws_command_once(&dedup_key).await {
+                    send_ack(
+                        socket,
+                        "DELETE_MESSAGE",
+                        command.client_msg_id,
+                        json!({"message_id": payload.message_id, "deduped": true}),
+                    )
+                    .await?;
+                    return Ok(());
+                }
+                state
+                    .storage
+                    .put_ws_command_once(&dedup_key, Utc::now().timestamp_millis())
+                    .await;
+            }
             let target = state
                 .channels
                 .get_message(context.workspace_id, payload.message_id)
@@ -616,6 +664,30 @@ async fn handle_client_text(
         "ADD_REACTION" => {
             let payload: ReactionPayload = serde_json::from_value(command.payload.clone())
                 .map_err(|_| ApiError::BadRequest("invalid ADD_REACTION payload".to_string()))?;
+            if let Some(client_msg_id) = normalize_client_msg_id(command.client_msg_id.as_deref())?
+            {
+                let dedup_key = ws_command_once_key(
+                    context.workspace_id,
+                    context.user_id,
+                    "ADD_REACTION",
+                    &format!("reaction:{}:{}", payload.message_id, payload.emoji.trim()),
+                    &client_msg_id,
+                );
+                if state.storage.has_ws_command_once(&dedup_key).await {
+                    send_ack(
+                        socket,
+                        "ADD_REACTION",
+                        command.client_msg_id,
+                        json!({"ok": true, "deduped": true}),
+                    )
+                    .await?;
+                    return Ok(());
+                }
+                state
+                    .storage
+                    .put_ws_command_once(&dedup_key, Utc::now().timestamp_millis())
+                    .await;
+            }
             let update = state
                 .reactions
                 .add_reaction(&state.channels, context, payload.message_id, &payload.emoji)
@@ -655,6 +727,30 @@ async fn handle_client_text(
         "REMOVE_REACTION" => {
             let payload: ReactionPayload = serde_json::from_value(command.payload.clone())
                 .map_err(|_| ApiError::BadRequest("invalid REMOVE_REACTION payload".to_string()))?;
+            if let Some(client_msg_id) = normalize_client_msg_id(command.client_msg_id.as_deref())?
+            {
+                let dedup_key = ws_command_once_key(
+                    context.workspace_id,
+                    context.user_id,
+                    "REMOVE_REACTION",
+                    &format!("reaction:{}:{}", payload.message_id, payload.emoji.trim()),
+                    &client_msg_id,
+                );
+                if state.storage.has_ws_command_once(&dedup_key).await {
+                    send_ack(
+                        socket,
+                        "REMOVE_REACTION",
+                        command.client_msg_id,
+                        json!({"ok": true, "deduped": true}),
+                    )
+                    .await?;
+                    return Ok(());
+                }
+                state
+                    .storage
+                    .put_ws_command_once(&dedup_key, Utc::now().timestamp_millis())
+                    .await;
+            }
             let update = state
                 .reactions
                 .remove_reaction(&state.channels, context, payload.message_id, &payload.emoji)
@@ -798,6 +894,23 @@ fn normalize_client_msg_id(value: Option<&str>) -> ApiResult<Option<String>> {
         ));
     }
     Ok(Some(normalized.to_string()))
+}
+
+fn ws_command_once_key(
+    workspace_id: Uuid,
+    user_id: Uuid,
+    command: &str,
+    target: &str,
+    client_msg_id: &str,
+) -> String {
+    format!(
+        "{}:{}:{}:{}:{}",
+        workspace_id,
+        user_id,
+        command.trim(),
+        target.trim(),
+        client_msg_id.trim()
+    )
 }
 
 #[cfg(test)]

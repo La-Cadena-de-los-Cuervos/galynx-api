@@ -11,6 +11,12 @@ pub struct Config {
     pub persistence_backend: PersistenceBackend,
     pub mongo_uri: Option<String>,
     pub redis_url: Option<String>,
+    pub s3_bucket: Option<String>,
+    pub s3_region: String,
+    pub s3_endpoint: Option<String>,
+    pub s3_access_key_id: Option<String>,
+    pub s3_secret_access_key: Option<String>,
+    pub s3_force_path_style: bool,
 }
 
 impl Config {
@@ -37,8 +43,23 @@ impl Config {
                 .unwrap_or(PersistenceBackend::Memory),
             mongo_uri: read_env("MONGO_URI"),
             redis_url: read_env("REDIS_URL"),
+            s3_bucket: read_env("S3_BUCKET"),
+            s3_region: read_env("S3_REGION").unwrap_or_else(|| "us-east-1".to_string()),
+            s3_endpoint: read_env("S3_ENDPOINT"),
+            s3_access_key_id: read_env("S3_ACCESS_KEY_ID"),
+            s3_secret_access_key: read_env("S3_SECRET_ACCESS_KEY"),
+            s3_force_path_style: read_env("S3_FORCE_PATH_STYLE")
+                .map(|value| parse_bool(&value))
+                .unwrap_or(true),
         }
     }
+}
+
+fn parse_bool(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "y" | "on"
+    )
 }
 
 fn read_env(key: &str) -> Option<String> {

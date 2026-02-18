@@ -40,7 +40,7 @@ pub async fn build_state(config: Config) -> AppState {
         auth_service.bootstrap_user_id(),
     );
     let audit_service = audit::AuditService::new(storage.clone());
-    let attachments_service = attachments::AttachmentService::new(storage.clone());
+    let attachments_service = attachments::AttachmentService::new(storage.clone(), &config).await;
     let rate_limit_service = rate_limit::RateLimitService::new();
     let reactions_service = reactions::ReactionService::new(storage.clone());
     let realtime_hub = realtime::RealtimeHub::new(config.redis_url.as_deref());

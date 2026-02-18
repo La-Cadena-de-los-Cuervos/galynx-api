@@ -1,5 +1,10 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
+use aws_config::{BehaviorVersion, Region, meta::region::RegionProviderChain};
+use aws_credential_types::Credentials;
+use aws_sdk_s3::{
+    Client as S3Client, config::Builder as S3ConfigBuilder, presigning::PresigningConfig,
+};
 use axum::{
     Json, Router,
     extract::{Path, State},
@@ -15,6 +20,7 @@ use uuid::Uuid;
 use crate::{
     app::AppState,
     auth::AuthContext,
+    config::Config,
     errors::{ApiError, ApiResult, ErrorResponse},
     storage::{AttachmentRecordStore, PendingUploadRecord, Storage},
 };
@@ -26,6 +32,14 @@ const DOWNLOAD_TTL_SECONDS: i64 = 600;
 #[derive(Clone)]
 pub struct AttachmentService {
     storage: Arc<Storage>,
+    object_storage: Option<Arc<S3ObjectStorage>>,
+}
+
+#[derive(Clone)]
+struct S3ObjectStorage {
+    client: S3Client,
+    bucket: String,
+    region: String,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -82,8 +96,20 @@ pub fn router() -> Router<AppState> {
 }
 
 impl AttachmentService {
-    pub fn new(storage: Arc<Storage>) -> Self {
-        Self { storage }
+    pub async fn new(storage: Arc<Storage>, config: &Config) -> Self {
+        let object_storage = S3ObjectStorage::from_config(config).await.map(Arc::new);
+        Self {
+            storage,
+            object_storage,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn new_without_object_storage(storage: Arc<Storage>) -> Self {
+        Self {
+            storage,
+            object_storage: None,
+        }
     }
 
     pub async fn presign(
@@ -117,6 +143,19 @@ impl AttachmentService {
             upload_id,
             sanitize_filename(&filename)
         );
+
+        let (bucket, upload_url) = if let Some(object_storage) = &self.object_storage {
+            let url = object_storage
+                .presign_upload_url(&key, &content_type, payload.size_bytes)
+                .await?;
+            (object_storage.bucket.clone(), url)
+        } else {
+            (
+                "galynx-attachments".to_string(),
+                format!("https://storage.galynx.local/upload/{upload_id}"),
+            )
+        };
+
         let pending = PendingUploadRecord {
             workspace_id: context.workspace_id,
             channel_id: payload.channel_id,
@@ -132,8 +171,8 @@ impl AttachmentService {
         self.storage.put_pending_upload(upload_id, pending).await;
         Ok(PresignResponse {
             upload_id,
-            upload_url: format!("https://storage.galynx.local/upload/{upload_id}"),
-            bucket: "galynx-attachments".to_string(),
+            upload_url,
+            bucket,
             key,
             expires_at: now + PRESIGN_TTL_SECONDS,
         })
@@ -166,6 +205,12 @@ impl AttachmentService {
             ));
         }
 
+        let (bucket, region) = if let Some(object_storage) = &self.object_storage {
+            (object_storage.bucket.clone(), object_storage.region.clone())
+        } else {
+            ("galynx-attachments".to_string(), "us-east-1".to_string())
+        };
+
         let attachment = AttachmentRecordStore {
             id: Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
             workspace_id: pending.workspace_id,
@@ -175,9 +220,9 @@ impl AttachmentService {
             filename: pending.filename,
             content_type: pending.content_type,
             size_bytes: pending.size_bytes,
-            bucket: "galynx-attachments".to_string(),
+            bucket,
             key: pending.storage_key,
-            region: "us-east-1".to_string(),
+            region,
             created_at: pending.created_at,
         };
         let response = AttachmentResponse::from(&attachment);
@@ -200,14 +245,106 @@ impl AttachmentService {
         }
 
         let expires_at = Utc::now().timestamp() + DOWNLOAD_TTL_SECONDS;
-        Ok(AttachmentGetResponse {
-            attachment: AttachmentResponse::from(&attachment),
-            download_url: format!(
+        let download_url = if let Some(object_storage) = &self.object_storage {
+            object_storage
+                .presign_download_url(&attachment.key)
+                .await
+                .map_err(|error| {
+                    ApiError::Internal(format!("failed to presign download url: {error}"))
+                })?
+        } else {
+            format!(
                 "https://storage.galynx.local/download/{}/{}?exp={}",
                 attachment.bucket, attachment.id, expires_at
-            ),
+            )
+        };
+
+        Ok(AttachmentGetResponse {
+            attachment: AttachmentResponse::from(&attachment),
+            download_url,
             expires_at,
         })
+    }
+}
+
+impl S3ObjectStorage {
+    async fn from_config(config: &Config) -> Option<Self> {
+        let bucket = config.s3_bucket.clone()?;
+
+        let region_provider =
+            RegionProviderChain::first_try(Some(Region::new(config.s3_region.clone())))
+                .or_default_provider();
+
+        let mut loader = aws_config::defaults(BehaviorVersion::latest()).region(region_provider);
+
+        if let (Some(access_key), Some(secret_key)) = (
+            config.s3_access_key_id.clone(),
+            config.s3_secret_access_key.clone(),
+        ) {
+            loader = loader.credentials_provider(Credentials::new(
+                access_key,
+                secret_key,
+                None,
+                None,
+                "galynx-config",
+            ));
+        }
+
+        let shared_config = loader.load().await;
+        let mut s3_builder = S3ConfigBuilder::from(&shared_config);
+
+        if let Some(endpoint) = &config.s3_endpoint {
+            s3_builder = s3_builder.endpoint_url(endpoint);
+        }
+
+        s3_builder = s3_builder.force_path_style(config.s3_force_path_style);
+        let client = S3Client::from_conf(s3_builder.build());
+
+        Some(Self {
+            client,
+            bucket,
+            region: config.s3_region.clone(),
+        })
+    }
+
+    async fn presign_upload_url(
+        &self,
+        key: &str,
+        content_type: &str,
+        size_bytes: u64,
+    ) -> ApiResult<String> {
+        let expires = Duration::from_secs(PRESIGN_TTL_SECONDS as u64);
+        let presigned = self
+            .client
+            .put_object()
+            .bucket(&self.bucket)
+            .key(key)
+            .content_type(content_type)
+            .content_length(size_bytes as i64)
+            .presigned(
+                PresigningConfig::expires_in(expires)
+                    .map_err(|error| ApiError::Internal(format!("invalid presign ttl: {error}")))?,
+            )
+            .await
+            .map_err(|error| {
+                ApiError::Internal(format!("failed to presign upload url: {error}"))
+            })?;
+
+        Ok(presigned.uri().to_string())
+    }
+
+    async fn presign_download_url(&self, key: &str) -> Result<String, String> {
+        let expires = Duration::from_secs(DOWNLOAD_TTL_SECONDS as u64);
+        let presigned = self
+            .client
+            .get_object()
+            .bucket(&self.bucket)
+            .key(key)
+            .presigned(PresigningConfig::expires_in(expires).map_err(|error| error.to_string())?)
+            .await
+            .map_err(|error| error.to_string())?;
+
+        Ok(presigned.uri().to_string())
     }
 }
 
@@ -348,7 +485,7 @@ mod tests {
 
     #[tokio::test]
     async fn presign_and_commit_attachment_success() {
-        let service = AttachmentService::new(Arc::new(
+        let service = AttachmentService::new_without_object_storage(Arc::new(
             Storage::new(PersistenceBackend::Memory, None)
                 .await
                 .expect("memory storage should init"),

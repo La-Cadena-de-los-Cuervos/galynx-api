@@ -47,6 +47,12 @@ Estado actual:
 - `PERSISTENCE_BACKEND` (`memory` o `mongo`, default: `memory`)
 - `MONGO_URI` (requerido cuando `PERSISTENCE_BACKEND=mongo`)
 - `REDIS_URL` (opcional, habilita pub/sub realtime entre réplicas)
+- `S3_BUCKET` (opcional, habilita presign real de adjuntos)
+- `S3_REGION` (default: `us-east-1`)
+- `S3_ENDPOINT` (opcional, para MinIO u otro endpoint S3 compatible)
+- `S3_ACCESS_KEY_ID` (opcional)
+- `S3_SECRET_ACCESS_KEY` (opcional)
+- `S3_FORCE_PATH_STYLE` (default: `true`, recomendado para MinIO)
 
 ## Ejecutar en local (sin Docker)
 
@@ -62,6 +68,12 @@ cargo run
 export PERSISTENCE_BACKEND=mongo
 export MONGO_URI='mongodb://root:password@localhost:27017/?authSource=admin'
 export REDIS_URL='redis://localhost:6379'
+export S3_BUCKET='galynx-attachments'
+export S3_REGION='us-east-1'
+export S3_ENDPOINT='http://localhost:9000'
+export S3_ACCESS_KEY_ID='minioadmin'
+export S3_SECRET_ACCESS_KEY='minioadmin'
+export S3_FORCE_PATH_STYLE='true'
 cargo run
 ```
 

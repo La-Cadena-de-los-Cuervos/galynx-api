@@ -1,6 +1,6 @@
 # Despliegue en Docker
 
-## Opcion 1: Docker Compose (API + Mongo + Redis)
+## Opcion 1: Docker Compose (API + Mongo + Redis + MinIO)
 
 Desde la raiz del repo:
 
@@ -34,13 +34,19 @@ Build:
 docker build -t galynx-api:local .
 ```
 
-Run (con Mongo externo):
+Run (con Mongo/Redis/MinIO externos):
 
 ```bash
 docker run --rm -p 3000:3000 \
   -e PERSISTENCE_BACKEND=mongo \
   -e MONGO_URI='mongodb://root:password@host.docker.internal:27017/?authSource=admin' \
   -e REDIS_URL='redis://host.docker.internal:6379' \
+  -e S3_BUCKET='galynx-attachments' \
+  -e S3_REGION='us-east-1' \
+  -e S3_ENDPOINT='http://host.docker.internal:9000' \
+  -e S3_ACCESS_KEY_ID='minioadmin' \
+  -e S3_SECRET_ACCESS_KEY='minioadmin' \
+  -e S3_FORCE_PATH_STYLE='true' \
   -e JWT_SECRET='dev-only-change-me-in-prod' \
   galynx-api:local
 ```
@@ -56,3 +62,8 @@ docker run --rm -p 3000:3000 \
 - `PERSISTENCE_BACKEND` (`memory` o `mongo`)
 - `MONGO_URI` (requerida cuando `PERSISTENCE_BACKEND=mongo`)
 - `REDIS_URL` (opcional, habilita pub/sub realtime entre réplicas)
+- `S3_BUCKET` (opcional, habilita presign real de adjuntos)
+- `S3_REGION` (default `us-east-1`)
+- `S3_ENDPOINT` (opcional, para MinIO/S3 compatible)
+- `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` (opcionales)
+- `S3_FORCE_PATH_STYLE` (default `true`, recomendado con MinIO)

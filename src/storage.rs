@@ -41,6 +41,7 @@ pub struct Storage {
     auth_memberships: Arc<RwLock<HashMap<(Uuid, Uuid), String>>>,
     refresh_sessions: Arc<RwLock<HashMap<String, RefreshSessionRecordStore>>>,
     ws_command_dedup: Arc<RwLock<HashMap<(Uuid, Uuid, Uuid, String), Uuid>>>,
+    ws_command_once: Arc<RwLock<HashSet<String>>>,
 }
 
 #[derive(Clone)]
@@ -55,6 +56,7 @@ struct MongoState {
     auth_memberships: Collection<Document>,
     refresh_sessions: Collection<Document>,
     ws_command_dedup: Collection<Document>,
+    ws_command_once: Collection<Document>,
 }
 
 #[derive(Debug, Clone)]
@@ -160,6 +162,7 @@ impl Storage {
                 auth_memberships: database.collection::<Document>("auth_memberships"),
                 refresh_sessions: database.collection::<Document>("refresh_sessions"),
                 ws_command_dedup: database.collection::<Document>("ws_command_dedup"),
+                ws_command_once: database.collection::<Document>("ws_command_once"),
             };
             ensure_mongo_indexes(&state).await?;
             Some(state)
@@ -181,6 +184,7 @@ impl Storage {
             auth_memberships: Arc::new(RwLock::new(HashMap::new())),
             refresh_sessions: Arc::new(RwLock::new(HashMap::new())),
             ws_command_dedup: Arc::new(RwLock::new(HashMap::new())),
+            ws_command_once: Arc::new(RwLock::new(HashSet::new())),
         })
     }
 
@@ -922,6 +926,33 @@ impl Storage {
             let _ = mongo.ws_command_dedup.insert_one(document).await;
         }
     }
+
+    pub async fn has_ws_command_once(&self, key: &str) -> bool {
+        if let Some(mongo) = &self.mongo {
+            if let Ok(found) = mongo.ws_command_once.find_one(doc! { "_id": key }).await {
+                return found.is_some();
+            }
+        }
+        self.ws_command_once.read().await.contains(key)
+    }
+
+    pub async fn put_ws_command_once(&self, key: &str, created_at: i64) {
+        self.ws_command_once.write().await.insert(key.to_string());
+        if let Some(mongo) = &self.mongo {
+            let _ = mongo
+                .ws_command_once
+                .delete_one(doc! { "_id": key.to_string() })
+                .await;
+            let _ = mongo
+                .ws_command_once
+                .insert_one(doc! {
+                    "_id": key.to_string(),
+                    "created_at": created_at,
+                    "created_at_dt": BsonDateTime::from_millis(created_at),
+                })
+                .await;
+        }
+    }
 }
 
 async fn ensure_mongo_indexes(state: &MongoState) -> Result<(), mongodb::error::Error> {
@@ -1032,6 +1063,20 @@ async fn ensure_mongo_indexes(state: &MongoState) -> Result<(), mongodb::error::
         )
         .await?;
 
+    state
+        .ws_command_once
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "created_at_dt": 1 })
+                .options(
+                    IndexOptions::builder()
+                        .expire_after(Some(std::time::Duration::from_secs(7 * 24 * 60 * 60)))
+                        .build(),
+                )
+                .build(),
+        )
+        .await?;
+
     Ok(())
 }
 
@@ -1095,5 +1140,17 @@ mod tests {
             .get_ws_command_message_id(workspace_id, user_id, channel_id, "client-1")
             .await;
         assert_eq!(found, Some(message_id));
+    }
+
+    #[tokio::test]
+    async fn ws_command_once_roundtrip_memory_backend() {
+        let storage = Storage::new(PersistenceBackend::Memory, None)
+            .await
+            .expect("memory storage should init");
+        let key = "workspace:user:EDIT_MESSAGE:message:1:client-1";
+
+        assert!(!storage.has_ws_command_once(key).await);
+        storage.put_ws_command_once(key, 1_700_000_000_000).await;
+        assert!(storage.has_ws_command_once(key).await);
     }
 }

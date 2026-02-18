@@ -19,6 +19,11 @@ Este documento esta enfocado en integracion frontend (web/mobile) con `galynx-ap
 - `PERSISTENCE_BACKEND` (`memory` o `mongo`, default: `memory`)
 - `MONGO_URI` (requerido cuando `PERSISTENCE_BACKEND=mongo`)
 - `REDIS_URL` (opcional, habilita pub/sub realtime entre réplicas)
+- `S3_BUCKET` (opcional, habilita presign real de adjuntos)
+- `S3_REGION` (default: `us-east-1`)
+- `S3_ENDPOINT` (opcional, para MinIO/S3 compatible)
+- `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` (opcionales)
+- `S3_FORCE_PATH_STYLE` (default: `true`, recomendado con MinIO)
 
 Ejemplo para Mongo local:
 
@@ -26,6 +31,12 @@ Ejemplo para Mongo local:
 export PERSISTENCE_BACKEND=mongo
 export MONGO_URI='mongodb://root:password@localhost:27017/?authSource=admin'
 export REDIS_URL='redis://localhost:6379'
+export S3_BUCKET='galynx-attachments'
+export S3_REGION='us-east-1'
+export S3_ENDPOINT='http://localhost:9000'
+export S3_ACCESS_KEY_ID='minioadmin'
+export S3_SECRET_ACCESS_KEY='minioadmin'
+export S3_FORCE_PATH_STYLE='true'
 cargo run
 ```
 
@@ -440,6 +451,7 @@ Nota de idempotencia:
 
 - En `SEND_MESSAGE`, si reutilizas el mismo `client_msg_id` para el mismo `channel_id` y usuario, la API responde el mismo `message_id` (sin crear duplicado).
 - En ese caso el ACK puede incluir `"deduped": true` en `payload.result`.
+- La misma estrategia de deduplicación por `client_msg_id` aplica también a `EDIT_MESSAGE`, `DELETE_MESSAGE`, `ADD_REACTION` y `REMOVE_REACTION`.
 
 Error WS:
 
