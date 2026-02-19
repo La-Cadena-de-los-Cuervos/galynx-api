@@ -14,6 +14,7 @@ use uuid::Uuid;
 
 use crate::{
     app::AppState,
+    attachments::AttachmentResponse,
     auth::{AuthContext, WorkspaceRole},
     errors::{ApiError, ApiResult, ErrorResponse},
     realtime,
@@ -64,6 +65,7 @@ pub struct MessageResponse {
     pub created_at: i64,
     pub edited_at: Option<i64>,
     pub deleted_at: Option<i64>,
+    pub attachments: Vec<AttachmentResponse>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -290,7 +292,12 @@ impl ChannelService {
             deleted_at: None,
         };
 
-        let response = MessageResponse::from(&message);
+        let response = self
+            .message_responses_with_attachments(context.workspace_id, vec![message.clone()])
+            .await
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| MessageResponse::from(&message));
         self.storage.insert_message(message).await;
         Ok(response)
     }
@@ -334,11 +341,13 @@ impl ChannelService {
             .collect::<Vec<_>>();
 
         let has_more = filtered.len() > limit;
-        let items = filtered
-            .into_iter()
-            .take(limit)
-            .map(MessageResponse::from)
-            .collect::<Vec<_>>();
+        let message_items = filtered.into_iter().take(limit).collect::<Vec<_>>();
+        let items = self
+            .message_responses_with_attachments(
+                context.workspace_id,
+                message_items.into_iter().cloned().collect(),
+            )
+            .await;
         let next_cursor = if has_more {
             items
                 .last()
@@ -380,7 +389,13 @@ impl ChannelService {
         message.body_md = body;
         message.edited_at = Some(Utc::now().timestamp_millis());
         self.storage.update_message(message.clone()).await;
-        Ok(MessageResponse::from(&message))
+        let response = self
+            .message_responses_with_attachments(context.workspace_id, vec![message.clone()])
+            .await
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| MessageResponse::from(&message));
+        Ok(response)
     }
 
     pub async fn delete_message(&self, context: &AuthContext, message_id: Uuid) -> ApiResult<()> {
@@ -420,7 +435,13 @@ impl ChannelService {
         if message.workspace_id != workspace_id || message.deleted_at.is_some() {
             return Err(ApiError::NotFound("message not found".to_string()));
         }
-        Ok(MessageResponse::from(&message))
+        let response = self
+            .message_responses_with_attachments(workspace_id, vec![message.clone()])
+            .await
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| MessageResponse::from(&message));
+        Ok(response)
     }
 
     pub async fn ensure_channel_access(
@@ -455,8 +476,14 @@ impl ChannelService {
             }
         }
 
+        let root_with_attachments = self
+            .message_responses_with_attachments(context.workspace_id, vec![root_message.clone()])
+            .await
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| MessageResponse::from(&root_message));
         Ok(ThreadSummaryResponse {
-            root_message: MessageResponse::from(&root_message),
+            root_message: root_with_attachments,
             reply_count,
             last_reply_at,
             participants,
@@ -503,11 +530,13 @@ impl ChannelService {
             .take(limit + 1)
             .collect::<Vec<_>>();
         let has_more = filtered.len() > limit;
-        let items = filtered
-            .into_iter()
-            .take(limit)
-            .map(MessageResponse::from)
-            .collect::<Vec<_>>();
+        let reply_items = filtered.into_iter().take(limit).collect::<Vec<_>>();
+        let items = self
+            .message_responses_with_attachments(
+                context.workspace_id,
+                reply_items.into_iter().cloned().collect(),
+            )
+            .await;
         let next_cursor = if has_more {
             items
                 .last()
@@ -561,9 +590,54 @@ impl ChannelService {
             deleted_at: None,
         };
 
-        let response = MessageResponse::from(&reply);
+        let response = self
+            .message_responses_with_attachments(context.workspace_id, vec![reply.clone()])
+            .await
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| MessageResponse::from(&reply));
         self.storage.insert_message(reply).await;
         Ok(response)
+    }
+
+    async fn message_responses_with_attachments(
+        &self,
+        workspace_id: Uuid,
+        messages: Vec<MessageRecordStore>,
+    ) -> Vec<MessageResponse> {
+        let message_ids = messages
+            .iter()
+            .map(|message| message.id)
+            .collect::<Vec<_>>();
+        let attachments_by_message = self
+            .storage
+            .list_attachments_for_messages(workspace_id, &message_ids)
+            .await;
+
+        messages
+            .into_iter()
+            .map(|message| {
+                let attachments = attachments_by_message
+                    .get(&message.id)
+                    .cloned()
+                    .unwrap_or_default()
+                    .iter()
+                    .map(AttachmentResponse::from)
+                    .collect::<Vec<_>>();
+                MessageResponse {
+                    id: message.id,
+                    workspace_id: message.workspace_id,
+                    channel_id: message.channel_id,
+                    sender_id: message.sender_id,
+                    body_md: message.body_md,
+                    thread_root_id: message.thread_root_id,
+                    created_at: message.created_at,
+                    edited_at: message.edited_at,
+                    deleted_at: message.deleted_at,
+                    attachments,
+                }
+            })
+            .collect()
     }
 
     async fn assert_channel_access(
@@ -676,6 +750,7 @@ impl From<&MessageRecordStore> for MessageResponse {
             created_at: message.created_at,
             edited_at: message.edited_at,
             deleted_at: message.deleted_at,
+            attachments: Vec::new(),
         }
     }
 }

@@ -434,6 +434,95 @@ impl Storage {
         self.attachments.read().await.get(attachment_id).cloned()
     }
 
+    pub async fn list_attachments_for_messages(
+        &self,
+        workspace_id: Uuid,
+        message_ids: &[Uuid],
+    ) -> HashMap<Uuid, Vec<AttachmentRecordStore>> {
+        let mut grouped: HashMap<Uuid, Vec<AttachmentRecordStore>> = HashMap::new();
+        if message_ids.is_empty() {
+            return grouped;
+        }
+
+        if let Some(mongo) = &self.mongo {
+            let message_id_values = message_ids
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>();
+            if let Ok(mut cursor) = mongo
+                .attachments
+                .find(doc! {
+                    "workspace_id": workspace_id.to_string(),
+                    "message_id": { "$in": message_id_values }
+                })
+                .await
+            {
+                while let Ok(true) = cursor.advance().await {
+                    let Ok(document) = cursor.deserialize_current() else {
+                        continue;
+                    };
+                    let Some(message_id) = optional_uuid_field(&document, "message_id") else {
+                        continue;
+                    };
+                    let Some(attachment) = (|| {
+                        Some(AttachmentRecordStore {
+                            id: uuid_field(&document, "_id")?,
+                            workspace_id: uuid_field(&document, "workspace_id")?,
+                            channel_id: uuid_field(&document, "channel_id")?,
+                            message_id: Some(message_id),
+                            uploader_id: uuid_field(&document, "uploader_id")?,
+                            filename: string_field(&document, "filename").unwrap_or_default(),
+                            content_type: string_field(&document, "content_type")
+                                .unwrap_or_default(),
+                            size_bytes: i64_field(&document, "size_bytes").unwrap_or_default()
+                                as u64,
+                            bucket: string_field(&document, "bucket").unwrap_or_default(),
+                            key: string_field(&document, "key").unwrap_or_default(),
+                            region: string_field(&document, "region").unwrap_or_default(),
+                            created_at: i64_field(&document, "created_at").unwrap_or_default(),
+                        })
+                    })() else {
+                        continue;
+                    };
+                    grouped.entry(message_id).or_default().push(attachment);
+                }
+                for items in grouped.values_mut() {
+                    items.sort_by(|a, b| {
+                        a.created_at
+                            .cmp(&b.created_at)
+                            .then_with(|| a.id.cmp(&b.id))
+                    });
+                }
+                return grouped;
+            }
+        }
+
+        let message_set = message_ids.iter().copied().collect::<HashSet<_>>();
+        for attachment in self.attachments.read().await.values() {
+            if attachment.workspace_id != workspace_id {
+                continue;
+            }
+            let Some(message_id) = attachment.message_id else {
+                continue;
+            };
+            if !message_set.contains(&message_id) {
+                continue;
+            }
+            grouped
+                .entry(message_id)
+                .or_default()
+                .push(attachment.clone());
+        }
+        for items in grouped.values_mut() {
+            items.sort_by(|a, b| {
+                a.created_at
+                    .cmp(&b.created_at)
+                    .then_with(|| a.id.cmp(&b.id))
+            });
+        }
+        grouped
+    }
+
     pub async fn add_reaction(&self, message_id: Uuid, emoji: &str, user_id: Uuid) {
         self.reactions
             .write()
@@ -1234,6 +1323,15 @@ async fn ensure_mongo_indexes(state: &MongoState) -> Result<(), mongodb::error::
         .create_index(
             IndexModel::builder()
                 .keys(doc! { "workspace_id": 1 })
+                .build(),
+        )
+        .await?;
+
+    state
+        .attachments
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "workspace_id": 1, "message_id": 1, "created_at": 1 })
                 .build(),
         )
         .await?;
